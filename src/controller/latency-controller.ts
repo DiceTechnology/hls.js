@@ -230,7 +230,22 @@ export default class LatencyController implements ComponentAPI {
           (2 / (1 + Math.exp(-0.75 * distanceFromTarget - this.edgeStalled))) *
             20
         ) / 20;
-      media.playbackRate = Math.min(max, Math.max(1, rate));
+      // Detect safari browser (special behavior for low latency streams)
+      // Setting <video> playbackRate can cause video playback disruption on Safari,
+      // So, need to reduce times of playbackRate changing as a workaround
+      const ua =
+        typeof navigator !== 'undefined'
+          ? navigator.userAgent.toLowerCase()
+          : '';
+      const isSafari = /safari/.test(ua) && !/chrome/.test(ua);
+      const minPlaybackRateChange = isSafari ? 0.15 : 0.02;
+      const newPlaybackRate = Math.min(max, Math.max(1, rate));
+      if (
+        Math.abs(newPlaybackRate - media.playbackRate) <= minPlaybackRateChange
+      ) {
+        return;
+      }
+      media.playbackRate = newPlaybackRate;
     } else if (media.playbackRate !== 1 && media.playbackRate !== 0) {
       media.playbackRate = 1;
     }

@@ -11,6 +11,8 @@ import type { ComponentAPI } from '../types/component-api';
 import type Hls from '../hls';
 import type { HlsConfig } from '../config';
 
+const NO_STALL_DURATION_TO_RECOVER = 30; // 30s
+
 export default class LatencyController implements ComponentAPI {
   private hls: Hls;
   private readonly config: HlsConfig;
@@ -18,6 +20,7 @@ export default class LatencyController implements ComponentAPI {
   private levelDetails: LevelDetails | null = null;
   private currentTime: number = 0;
   private stallCount: number = 0;
+  private _lastStallTime: number = 0;
   private _latency: number | null = null;
   private timeupdateHandler = () => this.timeupdate();
 
@@ -63,6 +66,21 @@ export default class LatencyController implements ComponentAPI {
     }
     const maxLiveSyncOnStallIncrease = targetduration;
     const liveSyncOnStallIncrease = 1.0;
+    // Try to reduce target latency when no stall detected in certain period (30s)
+    if (this.stallCount > 0) {
+      if (
+        Date.now() - this._lastStallTime >
+        NO_STALL_DURATION_TO_RECOVER * 1000
+      ) {
+        this._lastStallTime = Date.now();
+        const maxStallCount =
+          maxLiveSyncOnStallIncrease / liveSyncOnStallIncrease;
+        this.stallCount = Math.min(this.stallCount, maxStallCount) - 1;
+        logger.warn(
+          `[playback-rate-controller]: No stall detected in ${NO_STALL_DURATION_TO_RECOVER}s, adjusting target latency`
+        );
+      }
+    }
     return (
       targetLatency +
       Math.min(
@@ -162,6 +180,7 @@ export default class LatencyController implements ComponentAPI {
     this.levelDetails = null;
     this._latency = null;
     this.stallCount = 0;
+    this._lastStallTime = 0;
   }
 
   private onLevelUpdated(
@@ -182,6 +201,7 @@ export default class LatencyController implements ComponentAPI {
       return;
     }
     this.stallCount++;
+    this._lastStallTime = Date.now();
     logger.warn(
       '[playback-rate-controller]: Stall detected, adjusting target latency'
     );

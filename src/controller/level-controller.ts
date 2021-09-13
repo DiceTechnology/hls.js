@@ -361,7 +361,11 @@ export default class LevelController extends BasePlaylistController {
         // Do not perform level switch if an error occurred using delivery directives
         // Attempt to reload level without directives first
         if (context) {
-          if (context.deliveryDirectives) {
+          if (
+            context.deliveryDirectives &&
+            typeof context.deliveryDirectives.msn === 'number' &&
+            typeof context.deliveryDirectives.part === 'number'
+          ) {
             levelSwitch = false;
           }
           levelIndex = context.level;

@@ -241,8 +241,10 @@ export default class BasePlaylistController implements NetworkComponentAPI {
     if (retry) {
       this.retryCount++;
       if (
-        errorEvent.details.indexOf('LoadTimeOut') > -1 &&
-        errorEvent.context?.deliveryDirectives
+        (errorEvent.details.indexOf('LoadTimeOut') > -1 ||
+          errorEvent.details.indexOf('levelLoadError') > -1) &&
+        typeof errorEvent.context?.deliveryDirectives?.msn === 'number' &&
+        typeof errorEvent.context?.deliveryDirectives?.part === 'number'
       ) {
         // The LL-HLS request already timed out so retry immediately
         this.warn(

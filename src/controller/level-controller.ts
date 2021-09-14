@@ -403,6 +403,9 @@ export default class LevelController extends BasePlaylistController {
       if (retrying) {
         // boolean used to inform stream controller not to switch back to IDLE on non fatal error
         errorEvent.levelRetry = true;
+        if (!levelSwitch) {
+          level.loadError--;
+        }
       } else {
         this.currentLevelIndex = -1;
         return;

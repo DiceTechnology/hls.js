@@ -362,9 +362,8 @@ export default class LevelController extends BasePlaylistController {
         // Attempt to reload level without directives first
         if (context) {
           if (
-            context.deliveryDirectives &&
-            typeof context.deliveryDirectives.msn === 'number' &&
-            typeof context.deliveryDirectives.part === 'number'
+            typeof context?.deliveryDirectives?.msn === 'number' &&
+            typeof context?.deliveryDirectives?.part === 'number'
           ) {
             levelSwitch = false;
           }
@@ -429,6 +428,7 @@ export default class LevelController extends BasePlaylistController {
           this.warn(`${errorDetails}: switch to ${nextLevel}`);
           errorEvent.levelRetry = true;
           this.hls.nextAutoLevel = nextLevel;
+          this.nextLoadLevel = nextLevel;
         }
       }
     }
@@ -444,6 +444,7 @@ export default class LevelController extends BasePlaylistController {
       this._levels.forEach((level) => {
         level.urlId = newUrlId;
       });
+      this.hls.trigger(Events.ABORT_SEGMENT_LOADING, { newUrlId });
       this.level = levelIndex;
     }
   }

@@ -34,6 +34,7 @@ import type {
   LevelsUpdatedData,
   ManifestParsedData,
   MediaAttachedData,
+  AbortSegmentLoading,
 } from '../types/events';
 
 const TICK_INTERVAL = 100; // how often to tick in ms
@@ -82,6 +83,7 @@ export default class StreamController
     hls.on(Events.BUFFER_FLUSHED, this.onBufferFlushed, this);
     hls.on(Events.LEVELS_UPDATED, this.onLevelsUpdated, this);
     hls.on(Events.FRAG_BUFFERED, this.onFragBuffered, this);
+    hls.on(Events.ABORT_SEGMENT_LOADING, this.onAbortSegmentLoading, this);
   }
 
   protected _unregisterListeners() {
@@ -103,6 +105,7 @@ export default class StreamController
     hls.off(Events.BUFFER_FLUSHED, this.onBufferFlushed, this);
     hls.off(Events.LEVELS_UPDATED, this.onLevelsUpdated, this);
     hls.off(Events.FRAG_BUFFERED, this.onFragBuffered, this);
+    hls.off(Events.ABORT_SEGMENT_LOADING, this.onAbortSegmentLoading, this);
   }
 
   protected onHandlerDestroying() {
@@ -1348,5 +1351,16 @@ export default class StreamController
 
   get forceStartLoad() {
     return this._forceStartLoad;
+  }
+
+  onAbortSegmentLoading(
+    event: Events.ABORT_SEGMENT_LOADING,
+    data: AbortSegmentLoading
+  ) {
+    this.warn('redundant failove. abort current segment download');
+    this.abortCurrentFrag();
+    if (this.state === State.FRAG_LOADING) {
+      this.state = State.IDLE;
+    }
   }
 }

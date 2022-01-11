@@ -47,6 +47,7 @@ import {
   LiveBackBufferData,
   TrackLoadingData,
   BufferFlushedData,
+  AbortSegmentLoading,
 } from './types/events';
 
 /**
@@ -166,6 +167,8 @@ export enum Events {
   LIVE_BACK_BUFFER_REACHED = 'hlsLiveBackBufferReached',
   // fired when the back buffer is reached as defined by the backBufferLength config option - data : { bufferEnd: number }
   BACK_BUFFER_REACHED = 'hlsBackBufferReached',
+  // fired when redundant failover is happened
+  ABORT_SEGMENT_LOADING = 'hlsAbortSegmentLoading',
 }
 
 export interface HlsListeners {
@@ -361,6 +364,10 @@ export interface HlsListeners {
   [Events.BACK_BUFFER_REACHED]: (
     event: Events.BACK_BUFFER_REACHED,
     data: BackBufferData
+  ) => void;
+  [Events.ABORT_SEGMENT_LOADING]: (
+    event: Events.ABORT_SEGMENT_LOADING,
+    data: AbortSegmentLoading
   ) => void;
 }
 export interface HlsEventEmitter {

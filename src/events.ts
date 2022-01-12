@@ -48,6 +48,7 @@ import {
   TrackLoadingData,
   BufferFlushedData,
   AbortSegmentLoading,
+  VideoPTSNeededCC,
 } from './types/events';
 
 /**
@@ -169,6 +170,8 @@ export enum Events {
   BACK_BUFFER_REACHED = 'hlsBackBufferReached',
   // fired when redundant failover is happened
   ABORT_SEGMENT_LOADING = 'hlsAbortSegmentLoading',
+  // fired when audio stream controller is stuck and requires video PTS to be available for a continuity, this is a temporary fix until v1
+  VIDEO_PTS_NEEDED = 'hlsVideoPtsNeeded',
 }
 
 export interface HlsListeners {
@@ -368,6 +371,10 @@ export interface HlsListeners {
   [Events.ABORT_SEGMENT_LOADING]: (
     event: Events.ABORT_SEGMENT_LOADING,
     data: AbortSegmentLoading
+  ) => void;
+  [Events.VIDEO_PTS_NEEDED]: (
+    event: Events.VIDEO_PTS_NEEDED,
+    data: VideoPTSNeededCC
   ) => void;
 }
 export interface HlsEventEmitter {

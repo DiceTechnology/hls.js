@@ -76,6 +76,10 @@ export interface AbortSegmentLoading {
   newUrlId: number;
 }
 
+export interface VideoPTSNeededCC {
+  cc: number;
+}
+
 export interface ManifestLoadingData {
   url: string;
 }

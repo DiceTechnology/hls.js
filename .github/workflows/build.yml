@@ -195,14 +195,6 @@ jobs:
         env:
           CI: true
 
-      - name: deploy netlify
-        run: |
-          ./scripts/deploy-netlify.sh
-        env:
-          CI: true
-          GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
-          NETLIFY_ACCESS_TOKEN: ${{ secrets.NETLIFY_ACCESS_TOKEN }}
-
   update_draft_release:
     needs: [config, test_unit]
     if: needs.config.outputs.tag
@@ -287,14 +279,6 @@ jobs:
           npm ci
         env:
           CI: true
-
-      - name: publish to npm
-        run: |
-          ./scripts/publish-npm.sh
-        env:
-          CI: true
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          TAG: ${{ needs.config.outputs.tag }}
 
   test_functional_required:
     needs: [config, test_unit]

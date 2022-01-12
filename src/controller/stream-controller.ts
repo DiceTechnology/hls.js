@@ -35,6 +35,7 @@ import type {
   ManifestParsedData,
   MediaAttachedData,
   AbortSegmentLoading,
+  VideoPTSNeededCC,
 } from '../types/events';
 
 const TICK_INTERVAL = 100; // how often to tick in ms
@@ -84,6 +85,7 @@ export default class StreamController
     hls.on(Events.LEVELS_UPDATED, this.onLevelsUpdated, this);
     hls.on(Events.FRAG_BUFFERED, this.onFragBuffered, this);
     hls.on(Events.ABORT_SEGMENT_LOADING, this.onAbortSegmentLoading, this);
+    hls.on(Events.VIDEO_PTS_NEEDED, this.onVideoPtsNeeded, this);
   }
 
   protected _unregisterListeners() {
@@ -106,6 +108,7 @@ export default class StreamController
     hls.off(Events.LEVELS_UPDATED, this.onLevelsUpdated, this);
     hls.off(Events.FRAG_BUFFERED, this.onFragBuffered, this);
     hls.off(Events.ABORT_SEGMENT_LOADING, this.onAbortSegmentLoading, this);
+    hls.on(Events.VIDEO_PTS_NEEDED, this.onVideoPtsNeeded, this);
   }
 
   protected onHandlerDestroying() {
@@ -983,7 +986,11 @@ export default class StreamController
       const buffered = BufferHelper.getBuffered(media);
       const bufferStart = buffered.length ? buffered.start(0) : 0;
       const delta = bufferStart - startPosition;
-      if (delta > 0 && delta < this.config.maxBufferHole) {
+      if (
+        delta > 0 &&
+        (delta < this.config.maxBufferHole ||
+          delta < this.config.maxFragLookUpTolerance)
+      ) {
         logger.log(
           `adjusting start position by ${delta} to match buffer start`
         );
@@ -1362,5 +1369,9 @@ export default class StreamController
     if (this.state === State.FRAG_LOADING) {
       this.state = State.IDLE;
     }
+  }
+
+  onVideoPtsNeeded (event: Events.VIDEO_PTS_NEEDED, data: VideoPTSNeededCC) {
+    this.reAlignCC = data.cc;
   }
 }

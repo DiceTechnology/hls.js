@@ -228,6 +228,7 @@ export default class M3U8Parser {
         if (currentInitSegment) {
           frag.initSegment = currentInitSegment;
           frag.rawProgramDateTime = currentInitSegment.rawProgramDateTime;
+          currentInitSegment.rawProgramDateTime = null;
         }
       }
 
@@ -365,8 +366,8 @@ export default class M3U8Parser {
             const unsupportedKnownKeyformatsInManifest = [
               'com.apple.streamingkeydelivery',
               'com.microsoft.playready',
-              'urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed', // widevine (v2)
-              'com.widevine', // earlier widevine (v1)
+              // 'urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed', // widevine (v2)
+              // 'com.widevine', // earlier widevine (v1)
             ];
 
             if (
@@ -425,18 +426,23 @@ export default class M3U8Parser {
           }
           case 'MAP': {
             const mapAttrs = new AttrList(value1);
-            frag.relurl = mapAttrs.URI;
-            if (mapAttrs.BYTERANGE) {
-              frag.setByteRange(mapAttrs.BYTERANGE);
+            if (frag.duration) {
+              // Initial segment tag is after segment duration tag.
+              //   #EXTINF: 6.0
+              //   #EXT-X-MAP:URI="init.mp4
+              const init = new Fragment(type, baseurl);
+              setInitSegment(init, mapAttrs, id, levelkey);
+              currentInitSegment = init;
+              frag.initSegment = currentInitSegment;
+              if (currentInitSegment.rawProgramDateTime && !frag.rawProgramDateTime) {
+                frag.rawProgramDateTime = currentInitSegment.rawProgramDateTime;
+              }
+            } else {
+              // Initial segment tag is before segment duration tag
+              setInitSegment(frag, mapAttrs, id, levelkey);
+              currentInitSegment = frag;
+              createNextFrag = true;
             }
-            frag.level = id;
-            frag.sn = 'initSegment';
-            if (levelkey) {
-              frag.levelkey = levelkey;
-            }
-            frag.initSegment = null;
-            currentInitSegment = frag;
-            createNextFrag = true;
             break;
           }
           case 'SERVER-CONTROL': {
@@ -507,6 +513,10 @@ export default class M3U8Parser {
       assignProgramDateTime(frag, prevFrag);
       frag.cc = discontinuityCounter;
       level.fragmentHint = frag;
+    }
+    // set level key for hint fragment
+    if (level.fragmentHint && levelkey) {
+      level.fragmentHint.levelkey = levelkey;
     }
     const fragmentLength = fragments.length;
     const firstFragment = fragments[0];
@@ -621,4 +631,22 @@ function assignProgramDateTime(frag, prevFrag) {
     frag.programDateTime = null;
     frag.rawProgramDateTime = null;
   }
+}
+
+function setInitSegment(
+  frag: Fragment,
+  mapAttrs: AttrList,
+  id: number,
+  levelkey: LevelKey | undefined
+) {
+  frag.relurl = mapAttrs.URI;
+  if (mapAttrs.BYTERANGE) {
+    frag.setByteRange(mapAttrs.BYTERANGE);
+  }
+  frag.level = id;
+  frag.sn = 'initSegment';
+  if (levelkey) {
+    frag.levelkey = levelkey;
+  }
+  frag.initSegment = null;
 }

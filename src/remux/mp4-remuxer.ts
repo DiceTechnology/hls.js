@@ -46,6 +46,7 @@ export default class MP4Remuxer implements Remuxer {
   private nextAudioPts: number | null = null;
   private isAudioContiguous: boolean = false;
   private isVideoContiguous: boolean = false;
+  private isDiscontinuity: boolean = false;
 
   constructor(
     observer: HlsEventEmitter,
@@ -77,6 +78,7 @@ export default class MP4Remuxer implements Remuxer {
   resetTimeStamp(defaultTimeStamp) {
     logger.log('[mp4-remuxer]: initPTS & initDTS reset');
     this._initPTS = this._initDTS = defaultTimeStamp;
+    this.isDiscontinuity = true;
   }
 
   resetNextTimestamp() {
@@ -155,7 +157,11 @@ export default class MP4Remuxer implements Remuxer {
 
       if (enoughVideoSamples) {
         firstKeyFrameIndex = findKeyframeIndex(videoTrack.samples);
-        if (!isVideoContiguous && this.config.forceKeyFrameOnDiscontinuity) {
+        if (
+          this.config.forceKeyFrameOnDiscontinuity &&
+          (!isVideoContiguous ||
+            (this.isDiscontinuity && firstKeyFrameIndex > 0))
+        ) {
           independent = true;
           if (firstKeyFrameIndex > 0) {
             logger.warn(
@@ -163,6 +169,9 @@ export default class MP4Remuxer implements Remuxer {
             );
             const startPTS = this.getVideoStartPts(videoTrack.samples);
             videoTrack.samples = videoTrack.samples.slice(firstKeyFrameIndex);
+            if (this.isDiscontinuity) {
+              firstKeyFrameIndex = 0;
+            }
             videoTrack.dropped += firstKeyFrameIndex;
             videoTimeOffset +=
               (videoTrack.samples[0].pts - startPTS) /
@@ -631,6 +640,7 @@ export default class MP4Remuxer implements Remuxer {
     // next AVC sample DTS should be equal to last sample DTS + last sample duration (in PES timescale)
     this.nextAvcDts = nextAvcDts = lastDTS + mp4SampleDuration;
     this.isVideoContiguous = true;
+    this.isDiscontinuity = false;
     const moof = MP4.moof(
       track.sequenceNumber++,
       firstDTS,
@@ -779,17 +789,7 @@ export default class MP4Remuxer implements Remuxer {
           duration < MAX_SILENT_FRAME_DURATION &&
           alignedWithVideo
         ) {
-          let missing = Math.round(delta / inputSampleDuration);
-          // Adjust nextPts so that silent samples are aligned with media pts. This will prevent media samples from
-          // later being shifted if nextPts is based on timeOffset and delta is not a multiple of inputSampleDuration.
-          nextPts = pts - missing * inputSampleDuration;
-          if (nextPts < 0) {
-            missing--;
-            nextPts += inputSampleDuration;
-          }
-          if (i === 0) {
-            this.nextAudioPts = nextAudioPts = nextPts;
-          }
+          const missing = Math.round(delta / inputSampleDuration);
           logger.warn(
             `[mp4-remuxer]: Injecting ${missing} audio frame @ ${(
               nextPts / inputTimeScale

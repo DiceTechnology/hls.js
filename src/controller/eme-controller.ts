@@ -254,6 +254,7 @@ class EMEController implements ComponentAPI {
         logger.log(`Media-keys created for key-system "${keySystem}"`);
 
         this._onMediaKeysCreated();
+        this._attemptSetMediaKeys(mediaKeys);
 
         return mediaKeys;
       });
@@ -484,7 +485,7 @@ class EMEController implements ComponentAPI {
         licenseXhrSetup.call(this.hls, xhr, url);
         licenseXhrSetup = undefined;
       } catch (e) {
-        logger.error(e);
+        logger.warn(e);
       }
     }
     try {

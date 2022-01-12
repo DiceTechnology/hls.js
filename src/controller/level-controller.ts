@@ -32,6 +32,7 @@ export default class LevelController extends BasePlaylistController {
   private _startLevel?: number;
   private currentLevelIndex: number = -1;
   private manualLevelIndex: number = -1;
+  private cleanPreviousListener!: Function;
 
   public onParsedComplete!: Function;
 
@@ -379,6 +380,8 @@ export default class LevelController extends BasePlaylistController {
 
     if (levelIndex !== undefined) {
       this.recoverLevel(data, levelIndex, levelError, levelSwitch);
+    } else {
+      this.recoverAudioFailOver(event, data);
     }
   }
 
@@ -429,6 +432,142 @@ export default class LevelController extends BasePlaylistController {
           errorEvent.levelRetry = true;
           this.hls.nextAutoLevel = nextLevel;
           this.nextLoadLevel = nextLevel;
+        }
+      }
+    }
+  }
+
+  private recoverAudioFailOver(event: Events.ERROR, data: ErrorData) {
+    let nextLevelByAudioFail: number | undefined;
+    const details = data.details;
+    if (
+      details === ErrorDetails.FRAG_LOAD_ERROR ||
+      details === ErrorDetails.FRAG_LOAD_TIMEOUT ||
+      details === ErrorDetails.KEY_LOAD_ERROR ||
+      details === ErrorDetails.KEY_LOAD_TIMEOUT
+    ) {
+      if (data.frag?.type === PlaylistLevelType.AUDIO) {
+        nextLevelByAudioFail = this.getNextLevelWithAudioFailOver();
+        if (nextLevelByAudioFail !== undefined) {
+          this.switchLevelInAudioFailOver(data, nextLevelByAudioFail);
+        }
+      }
+    }
+  }
+
+  private getNextLevelWithAudioFailOver(): number | undefined {
+    let nextLevelByAudioFail: number | undefined;
+    const audioTrack = this.hls.audioTrack;
+
+    if (audioTrack !== -1) {
+      const audioTracks = this.hls.audioTracks;
+      const audioLevel = audioTracks[audioTrack];
+
+      // Find the next level with a different audio group ID.
+      const levels = this._levels
+        // get level indexes
+        .map((level, index) => ({ level, index }))
+        // filter out all levels with the current audioGroupId
+        .filter(
+          ({ level: { audioGroupIds } }) =>
+            (audioGroupIds as string[]).indexOf(
+              audioLevel.groupId as string
+            ) === -1
+        )
+        .map((x) => ({
+          difference: x.index - this.hls.nextAutoLevel,
+          index: x.index,
+        }));
+
+      let highestNegativeDifference;
+      let highestPositiveDifference;
+      for (const level of levels) {
+        if (
+          level.difference < 0 &&
+          (!highestNegativeDifference ||
+            highestNegativeDifference.difference < level.difference)
+        ) {
+          highestNegativeDifference = level;
+        }
+        if (
+          level.difference > 0 &&
+          (!highestPositiveDifference ||
+            highestPositiveDifference.difference < level.difference)
+        ) {
+          highestPositiveDifference = level;
+        }
+      }
+
+      const nextIndex =
+        highestNegativeDifference?.index ?? highestPositiveDifference?.index;
+
+      if (nextIndex !== undefined) {
+        nextLevelByAudioFail = nextIndex;
+      }
+    }
+
+    return nextLevelByAudioFail;
+  }
+
+  private switchLevelInAudioFailOver(
+    errorEvent: ErrorData,
+    nextLevelByAudioFail: number
+  ): void {
+    const { details: errorDetails } = errorEvent;
+    const level = this._levels[nextLevelByAudioFail];
+
+    level.loadError++;
+
+    if (this.manualLevelIndex === -1) {
+      // Search for available level in auto level selection mode, cycling from highest to lowest bitrate
+      if (this.currentLevelIndex !== nextLevelByAudioFail) {
+        this.warn(`${errorDetails}: switch to ${nextLevelByAudioFail}`);
+        this.hls.nextAutoLevel = nextLevelByAudioFail;
+
+        const { frag } = errorEvent;
+        if (
+          frag &&
+          frag.type === PlaylistLevelType.AUDIO &&
+          typeof frag.sn === 'number'
+        ) {
+          const waitUntil = frag.sn + 2;
+          this.warn(
+            `auto level will be restricted until fragment ${waitUntil}.`
+          );
+
+          const handleSeeking = (() => {
+            this.log('auto level restriction cancelled due to seeking.');
+            this.cleanPreviousListener();
+          }).bind(this);
+          const handleFragChanged = ((event, data) => {
+            if (data.frag.sn >= waitUntil) {
+              this.log('auto level restriction lifted.');
+              this.cleanPreviousListener();
+            }
+          }).bind(this);
+          const handleFragLoaded = (event, data) => {
+            this.log(
+              `restrict auto level to ${nextLevelByAudioFail} until we play through fragment ${frag.sn}. Currently on ${frag.type}`
+            );
+            // this.hls.nextAutoLevel = this.currentLevelIndex = nextLevel;
+            this.hls.nextAutoLevel = nextLevelByAudioFail;
+          };
+
+          if (this.hls.media) {
+            this.hls.media.addEventListener('seeking', handleSeeking);
+            this.hls.on(Events.FRAG_CHANGED, handleFragChanged);
+            this.hls.on(Events.FRAG_LOADED, handleFragLoaded);
+          }
+          if (this.cleanPreviousListener) {
+            this.cleanPreviousListener();
+          }
+          this.cleanPreviousListener = (() => {
+            if (this.hls.media) {
+              this.hls.media.removeEventListener('seeking', handleSeeking);
+              this.hls.off(Events.FRAG_CHANGED, handleFragChanged);
+              this.hls.off(Events.FRAG_LOADED, handleFragLoaded);
+            }
+          }).bind(this);
         }
       }
     }

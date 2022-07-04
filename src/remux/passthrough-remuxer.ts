@@ -1,3 +1,4 @@
+import { flushTextTrackMetadataCueSamples } from './mp4-remuxer';
 import type { InitData, InitDataTrack } from '../utils/mp4-tools';
 import {
   getDuration,
@@ -214,33 +215,17 @@ class PassThroughRemuxer implements Remuxer {
       dropped: 0,
     };
 
-    if (this.initPTS != null) {
-      const samples = parseId3TrackSamples(data);
-
-      for (let index = 0; index < samples.length; index++) {
-        const sample = samples[index];
-        if (sample == null) {
-          continue;
-        }
-        if (sample.timescale == null) {
-          continue;
-        }
-
-        sample.pts = sample.pts / sample.timescale - this.initPTS;
-        sample.dts = sample.dts / sample.timescale - this.initPTS;
-        sample.duration =
-          sample.duration != null
-            ? sample.duration / sample.timescale
-            : undefined;
-        id3Track.samples.push(sample);
-      }
-    }
-
     result.audio = track.type === 'audio' ? track : undefined;
     result.video = track.type !== 'audio' ? track : undefined;
     result.text = textTrack;
-    result.id3 = id3Track;
     result.initSegment = initSegment;
+    const id3InitPts = this.initPTS ?? 0;
+    result.id3 = flushTextTrackMetadataCueSamples(
+      id3Track,
+      timeOffset,
+      id3InitPts,
+      id3InitPts
+    );
 
     return result;
   }

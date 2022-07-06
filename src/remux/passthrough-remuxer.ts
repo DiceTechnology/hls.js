@@ -6,7 +6,6 @@ import {
   offsetStartDTS,
   parseInitSegment,
   parseVideoSegmentTextTrackSamples,
-  parseId3TrackSamples,
 } from '../utils/mp4-tools';
 import { ElementaryStreamTypes } from '../loader/fragment';
 import { logger } from '../utils/logger';

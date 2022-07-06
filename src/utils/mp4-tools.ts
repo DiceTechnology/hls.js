@@ -12,10 +12,6 @@ type Mp4BoxData = {
 
 const UINT32_MAX = Math.pow(2, 32) - 1;
 const push = [].push;
-const ID3_SCHEME_ID_URIS = [
-  'https://aomedia.org/emsg/ID3',
-  'https://developer.apple.com/streaming/emsg-id3',
-];
 
 export function bin2str(data: Uint8Array): string {
   return String.fromCharCode.apply(null, data);
@@ -128,60 +124,6 @@ export function findBox(
 
   // we've finished searching all of data
   return results;
-}
-
-export function parseId3TrackSamples(data) {
-  const emsgs = findBox(data, ['emsg']);
-  return emsgs.map((emsg) => {
-    try {
-      const data = emsg.data.subarray(emsg.start, emsg.end);
-      let offset = 0;
-
-      const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-      const version = view.getUint8(offset);
-      if (version !== 1) {
-        return undefined;
-      }
-
-      // skip over 3 bytes of flags
-      offset += 4;
-      const timescale = view.getUint32(offset);
-      offset += 4;
-      const presentationTime = Number(view.getBigUint64(offset));
-      offset += 8;
-      const eventDuration = view.getUint32(offset);
-      offset += 4;
-      const id = view.getUint32(offset);
-      offset += 4;
-      const schemeIdUri = readNullTerminatedString(data, offset);
-      if (!ID3_SCHEME_ID_URIS.includes(schemeIdUri)) {
-        return undefined;
-      }
-
-      // skip over the null byte
-      offset += schemeIdUri.length + 1;
-      const value = readNullTerminatedString(data, offset);
-      // skip over the null byte
-      offset += value.length + 1;
-      // the rest is id3 payload
-      const messageData = new Uint8Array(
-        data.subarray(offset, data.byteLength)
-      );
-
-      return {
-        timescale,
-        pts: presentationTime,
-        dts: presentationTime,
-        duration: eventDuration !== 0xffffffff ? eventDuration : undefined,
-        id,
-        schemeIdUri,
-        value,
-        data: messageData,
-      };
-    } catch (e) {
-      return undefined;
-    }
-  });
 }
 
 type SidxInfo = {
@@ -673,13 +615,14 @@ export function parseEmsg(data: Uint8Array): IEmsgParsingData {
   let schemeIdUri: string = '';
   let value: string = '';
   let timeScale: number = 0;
-  let presentationTimeDelta: number = 0;
+  let presentationTimeDelta: number = Number.POSITIVE_INFINITY;
   let presentationTime: number = 0;
   let eventDuration: number = 0;
   let id: number = 0;
   let offset: number = 0;
 
   if (version === 0) {
+    offset += 4;
     while (bin2str(data.subarray(offset, offset + 1)) !== '\0') {
       schemeIdUri += bin2str(data.subarray(offset, offset + 1));
       offset += 1;
@@ -696,11 +639,14 @@ export function parseEmsg(data: Uint8Array): IEmsgParsingData {
     value += bin2str(data.subarray(offset, offset + 1));
     offset += 1;
 
-    timeScale = readUint32(data, 12);
-    presentationTimeDelta = readUint32(data, 16);
-    eventDuration = readUint32(data, 20);
-    id = readUint32(data, 24);
-    offset = 28;
+    timeScale = readUint32(data, offset);
+    offset += 4;
+    presentationTimeDelta = readUint32(data, offset);
+    offset += 4;
+    eventDuration = readUint32(data, offset);
+    offset += 4;
+    id = readUint32(data, offset);
+    offset += 4;
   } else if (version === 1) {
     offset += 4;
     timeScale = readUint32(data, offset);
@@ -1405,4 +1351,48 @@ export function discardEmulationPreventionBytes(data: Uint8Array): Uint8Array {
 
 export function toUnsigned(value: number): number {
   return value >>> 0;
+}
+
+export function parseEarlieastPresentationTime(data: Uint8Array): SidxInfo | null {
+  const sidxBox = findBox(data, ['sidx']);
+
+  if (!sidxBox || !sidxBox[0]) {
+    return null;
+  }
+
+  let index = 0;
+  const sidx = sidxBox[0];
+  const version = sidx.data[sidx.start];
+
+  // skip version and reference_id
+  index += 8;
+
+  const timescale = readUint32(sidx, index);
+  index += 4;
+
+  let earliestPresentationTime = 0;
+  if (version === 0) {
+    earliestPresentationTime = readUint32(sidx, index);
+    // skip first_offset
+    index += 8;
+  } else {
+    const leftEarliPresentationTime = readUint32(sidx, index);
+    index += 4;
+    const rightEarliPresentationTime = readUint32(sidx, index);
+    index += 4;
+    earliestPresentationTime = 2 ** 32 * leftEarliPresentationTime + rightEarliPresentationTime;
+    if (!Number.isSafeInteger(earliestPresentationTime)) {
+      earliestPresentationTime = Number.MAX_SAFE_INTEGER;
+    }
+    index += 8;
+  }
+
+  return {
+    earliestPresentationTime,
+    timescale,
+    version,
+    referencesCount: 0,
+    references: [],
+    moovEndOffset: 0,
+  };
 }

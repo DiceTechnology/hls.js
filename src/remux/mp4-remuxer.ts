@@ -253,11 +253,20 @@ export default class MP4Remuxer implements Remuxer {
     // Allow ID3 and text to remux, even if more audio/video samples are required
     if (this.ISGenerated) {
       if (id3Track.samples.length) {
-        id3 = this.remuxID3(id3Track, timeOffset);
+        id3 = flushTextTrackMetadataCueSamples(
+          id3Track,
+          timeOffset,
+          this._initPTS,
+          this._initDTS
+        );
       }
 
       if (textTrack.samples.length) {
-        text = this.remuxText(textTrack, timeOffset);
+        text = flushTextTrackUserdataCueSamples(
+          textTrack,
+          timeOffset,
+          this._initPTS
+        );
       }
     }
 
@@ -1059,6 +1068,62 @@ function findKeyframeIndex(samples: Array<AvcSample>): number {
     }
   }
   return -1;
+}
+
+export function flushTextTrackMetadataCueSamples(
+  track: DemuxedMetadataTrack,
+  timeOffset: number,
+  initPTS: number,
+  initDTS: number
+): RemuxedMetadata | undefined {
+  const length = track.samples.length;
+  if (!length) {
+    return;
+  }
+  const inputTimeScale = track.inputTimeScale;
+  for (let index = 0; index < length; index++) {
+    const sample = track.samples[index];
+    // setting id3 pts, dts to relative time
+    // using this._initPTS and this._initDTS to calculate relative time
+    sample.pts =
+      normalizePts(sample.pts - initPTS, timeOffset * inputTimeScale) /
+      inputTimeScale;
+    sample.dts =
+      normalizePts(sample.dts - initDTS, timeOffset * inputTimeScale) /
+      inputTimeScale;
+  }
+  const samples = track.samples;
+  track.samples = [];
+  return {
+    samples,
+  };
+}
+
+export function flushTextTrackUserdataCueSamples(
+  track: DemuxedUserdataTrack,
+  timeOffset: number,
+  initPTS: number
+): RemuxedUserdata | undefined {
+  const length = track.samples.length;
+  if (!length) {
+    return;
+  }
+
+  const inputTimeScale = track.inputTimeScale;
+  for (let index = 0; index < length; index++) {
+    const sample = track.samples[index];
+    // setting text pts, dts to relative time
+    // using this._initPTS and this._initDTS to calculate relative time
+    sample.pts =
+      normalizePts(sample.pts - initPTS, timeOffset * inputTimeScale) /
+      inputTimeScale;
+  }
+  track.samples.sort((a, b) => a.pts - b.pts);
+  const samples = track.samples;
+  track.samples = [];
+  return {
+    samples,
+  };
 }
 
 class Mp4Sample {

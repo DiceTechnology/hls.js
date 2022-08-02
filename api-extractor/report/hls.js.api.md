@@ -609,7 +609,9 @@ export enum Events {
     // (undocumented)
     SUBTITLE_TRACKS_CLEARED = "hlsSubtitleTracksCleared",
     // (undocumented)
-    SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated"
+    SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated",
+    // (undocumented)
+    VIDEO_PTS_NEEDED = "hlsVideoPtsNeeded"
 }
 
 // Warning: (ae-missing-release-tag) "FPSControllerConfig" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -1144,6 +1146,10 @@ export interface HlsListeners {
     [Events.SUBTITLE_TRACKS_UPDATED]: (event: Events.SUBTITLE_TRACKS_UPDATED, data: SubtitleTracksUpdatedData) => void;
     // (undocumented)
     [Events.SUBTITLE_TRACK_SWITCH]: (event: Events.SUBTITLE_TRACK_SWITCH, data: SubtitleTrackSwitchData) => void;
+    // Warning: (ae-forgotten-export) The symbol "VideoPTSNeededCC" needs to be exported by the entry point hls.d.ts
+    //
+    // (undocumented)
+    [Events.VIDEO_PTS_NEEDED]: (event: Events.VIDEO_PTS_NEEDED, data: VideoPTSNeededCC) => void;
 }
 
 // Warning: (ae-missing-release-tag) "HlsPerformanceTiming" is exported by the package, but it is missing a release tag (@alpha, @beta, @public, or @internal)

@@ -146,6 +146,7 @@ export type FPSControllerConfig = {
 
 export type LevelControllerConfig = {
   startLevel?: number;
+  replaceCodecs: [string, string][];
 };
 
 export type MP4RemuxerConfig = {
@@ -366,6 +367,7 @@ export const hlsDefaultConfig: HlsConfig = {
   workerPath: null, // used by transmuxer
   enableSoftwareAES: true, // used by decrypter
   startLevel: undefined, // used by level-controller
+  replaceCodecs: [], // used by level-controller
   startFragPrefetch: false, // used by stream-controller
   fpsDroppedMonitoringPeriod: 5000, // used by fps-controller
   fpsDroppedMonitoringThreshold: 0.2, // used by fps-controller

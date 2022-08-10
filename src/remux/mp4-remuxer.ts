@@ -47,6 +47,7 @@ export default class MP4Remuxer implements Remuxer {
   private videoSampleDuration: number | null = null;
   private isAudioContiguous: boolean = false;
   private isVideoContiguous: boolean = false;
+  private muxAudioFailed: boolean = false;
 
   constructor(
     observer: HlsEventEmitter,
@@ -229,6 +230,19 @@ export default class MP4Remuxer implements Remuxer {
               isVideoContiguous,
               audioTrackLength
             );
+          }
+          if (
+            this.muxAudioFailed &&
+            audioTrack.segmentCodec === 'aac' &&
+            this.isAudioContiguous &&
+            flush
+          ) {
+            audio = this.remuxEmptyAACAudio(
+              audioTrack,
+              audioTimeOffset,
+              this.isAudioContiguous
+            );
+            this.muxAudioFailed = false;
           }
         } else if (enoughVideoSamples) {
           video = this.remuxVideo(
@@ -743,17 +757,18 @@ export default class MP4Remuxer implements Remuxer {
       sample.pts = normalizePts(sample.pts - initPTS, timeOffsetMpegTS);
     });
 
+    // filter out sample with negative PTS that are not playable anyway
+    // if we don't remove these negative samples, they will shift all audio samples forward.
+    // leading to audio overlap between current / next fragment
+    inputSamples = inputSamples.filter((sample) => sample.pts >= 0);
+
+    // in case all samples have negative PTS, and have been filtered out, return now
+    if (inputSamples.length === 0) {
+      this.muxAudioFailed = true;
+      return;
+    }
+
     if (!contiguous || nextAudioPts < 0) {
-      // filter out sample with negative PTS that are not playable anyway
-      // if we don't remove these negative samples, they will shift all audio samples forward.
-      // leading to audio overlap between current / next fragment
-      inputSamples = inputSamples.filter((sample) => sample.pts >= 0);
-
-      // in case all samples have negative PTS, and have been filtered out, return now
-      if (!inputSamples.length) {
-        return;
-      }
-
       if (videoTimeOffset === 0) {
         // Set the start to 0 to match video so that start gaps larger than inputSampleDuration are filled with silence
         nextAudioPts = 0;
@@ -952,6 +967,66 @@ export default class MP4Remuxer implements Remuxer {
 
     console.assert(mdat.length, 'MDAT length must not be zero');
     return audioData;
+  }
+
+  remuxEmptyAACAudio(
+    track: DemuxedAudioTrack,
+    timeOffset: number,
+    contiguous: boolean
+  ): RemuxedTrack | undefined {
+    const duration = track.samples.length;
+    if (duration < 0) {
+      return;
+    }
+
+    const inputTimeScale: number = track.inputTimeScale;
+    const mp4timeScale: number = track.samplerate
+      ? track.samplerate
+      : inputTimeScale;
+    const scaleFactor: number = inputTimeScale / mp4timeScale;
+    const nextAudioPts: number | null = this.nextAudioPts;
+    if (nextAudioPts) {
+      // sync with video's timestamp
+      const startDTS: number = nextAudioPts;
+      // one sample's duration value
+      const frameDuration: number = scaleFactor * AAC_SAMPLES_PER_FRAME;
+      // samples count of this segment's duration
+      const nbSamples: number = duration;
+      // silent frame
+      const silentFrame: Uint8Array | undefined = AAC.getSilentFrame(
+        track.manifestCodec || track.codec,
+        track.channelCount
+      );
+
+      logger.warn('[mp4-remuxer]: remux empty AAC Audio');
+      // Can't remux if we can't generate a silent frame...
+      if (!silentFrame) {
+        logger.trace(
+          '[mp4-remuxer]: Unable to remuxEmptyAudio since we were unable to get a silent frame for given audio codec'
+        );
+        return;
+      }
+
+      // window.audioSamples ? window.audioSamples.push(inputSamples.map(s => s.pts)) : (window.audioSamples = [inputSamples.map(s => s.pts)]);
+
+      // for audio samples, also consider consecutive fragments as being contiguous (even if a level switch occurs),
+      // for sake of clarity:
+      // consecutive fragments are frags with
+      //  - less than 100ms gaps between new time offset (if accurate) and next expected PTS OR
+      //  - less than 20 audio frames distance
+      // contiguous fragments are consecutive fragments from same quality level (same level, new SN = old SN + 1)
+      // this helps ensuring audio continuity
+      // and this also avoids audio glitches/cut when switching quality, or reporting wrong duration on first audio frame
+      const samples: Array<any> = [];
+      for (let i = 0; i < nbSamples; i++) {
+        const stamp = startDTS + i * frameDuration + this._initPTS;
+        samples.push({ unit: silentFrame, pts: stamp, dts: stamp });
+      }
+      track.samples = samples;
+      return this.remuxAudio(track, timeOffset, contiguous, false);
+    }
+
+    return;
   }
 
   remuxEmptyAudio(

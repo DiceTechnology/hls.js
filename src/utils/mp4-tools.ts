@@ -1007,6 +1007,5 @@ export function parseEarlieastPresentationTime(data: Uint8Array): SidxInfo | nul
     version,
     referencesCount: 0,
     references: [],
-    moovEndOffset: 0,
   };
 }

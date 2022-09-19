@@ -32,7 +32,6 @@ import type { HlsConfig } from '../config';
 const emsgSchemePattern = /\/emsg[-/]ID3|urn:scte:scte35:2013:xml/i;
 
 class MP4Demuxer implements Demuxer {
-  static readonly minProbeByteLength = 1024;
   private remainderData: Uint8Array | null = null;
   private timeOffset: number = 0;
   private config: HlsConfig;

@@ -1,6 +1,6 @@
 import TaskLoop from '../task-loop';
 import { FragmentState } from './fragment-tracker';
-import { Bufferable, BufferHelper } from '../utils/buffer-helper';
+import { Bufferable, BufferHelper, BufferInfo } from '../utils/buffer-helper';
 import { logger } from '../utils/logger';
 import { Events } from '../events';
 import { ErrorDetails } from '../errors';
@@ -226,22 +226,29 @@ export default class BaseStreamController
 
     if (state === State.ENDED) {
       this.resetLoadingState();
-    } else if (fragCurrent && !bufferInfo.len) {
-      // check if we are seeking to a unbuffered area AND if frag loading is in progress
+    } else if (fragCurrent) {
+      // Seeking while frag load is in progress
       const tolerance = config.maxFragLookUpTolerance;
       const fragStartOffset = fragCurrent.start - tolerance;
       const fragEndOffset =
         fragCurrent.start + fragCurrent.duration + tolerance;
-      const pastFragment = currentTime > fragEndOffset;
-      // check if the seek position is past current fragment, and if so abort loading
-      if (currentTime < fragStartOffset || pastFragment) {
-        if (pastFragment && fragCurrent.loader) {
-          this.log(
-            'seeking outside of buffer while fragment load in progress, cancel fragment load'
-          );
-          fragCurrent.loader.abort();
+      // if seeking out of buffered range or into new one
+      if (
+        !bufferInfo.len ||
+        fragEndOffset < bufferInfo.start ||
+        fragStartOffset > bufferInfo.end
+      ) {
+        const pastFragment = currentTime > fragEndOffset;
+        // if the seek position is outside the current fragment range
+        if (currentTime < fragStartOffset || pastFragment) {
+          if (pastFragment && fragCurrent.loader) {
+            this.log(
+              'seeking outside of buffer while fragment load in progress, cancel fragment load'
+            );
+            fragCurrent.loader.abort();
+          }
+          this.resetLoadingState();
         }
-        this.resetLoadingState();
       }
     }
 
@@ -521,8 +528,9 @@ export default class BaseStreamController
     }
     if (
       !this.loadedmetadata &&
+      frag.type == PlaylistLevelType.MAIN &&
       media.buffered.length &&
-      this.fragCurrent === this.fragPrevious
+      this.fragCurrent?.sn === this.fragPrevious?.sn
     ) {
       this.loadedmetadata = true;
       this.seekToStartPos();
@@ -779,12 +787,7 @@ export default class BaseStreamController
   protected getFwdBufferInfo(
     bufferable: Bufferable | null,
     type: PlaylistLevelType
-  ): {
-    len: number;
-    start: number;
-    end: number;
-    nextStart?: number;
-  } | null {
+  ): BufferInfo | null {
     const { config } = this;
     const pos = this.getLoadPosition();
     if (!Number.isFinite(pos)) {
@@ -1008,7 +1011,8 @@ export default class BaseStreamController
     end: number,
     levelDetails: LevelDetails
   ): Fragment | null {
-    const { config, fragPrevious } = this;
+    const { config } = this;
+    let { fragPrevious } = this;
     let { fragments, endSN } = levelDetails;
     const { fragmentHint } = levelDetails;
     const tolerance = config.maxFragLookUpTolerance;
@@ -1058,6 +1062,11 @@ export default class BaseStreamController
 
     if (frag) {
       const curSNIdx = frag.sn - levelDetails.startSN;
+      // Move fragPrevious forward to support forcing the next fragment to load
+      // when the buffer catches up to a previously buffered range.
+      if (this.fragmentTracker.getState(frag) === FragmentState.OK) {
+        fragPrevious = frag;
+      }
       if (fragPrevious && frag.sn === fragPrevious.sn && !loadingParts) {
         // Force the next fragment to load if the previous one was already selected. This can occasionally happen with
         // non-uniform fragment durations

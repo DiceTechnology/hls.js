@@ -25,6 +25,7 @@ import type { MediaPlaylist } from './types/media-playlist';
 import type { HlsConfig } from './config';
 import type { Level } from './types/level';
 import type { Fragment } from './loader/fragment';
+import { BufferInfo } from './utils/buffer-helper';
 
 /**
  * @module Hls
@@ -100,7 +101,7 @@ export default class Hls implements HlsEventEmitter {
   constructor(userConfig: Partial<HlsConfig> = {}) {
     const config = (this.config = mergeConfig(Hls.DefaultConfig, userConfig));
     this.userConfig = userConfig;
-    enableLogs(config.debug);
+    enableLogs(config.debug, 'Hls instance');
 
     this._autoLevelCapping = -1;
 
@@ -680,6 +681,10 @@ export default class Hls implements HlsEventEmitter {
    */
   public get playingDate(): Date | null {
     return this.streamController.currentProgramDateTime;
+  }
+
+  public get mainForwardBufferInfo(): BufferInfo | null {
+    return this.streamController.getMainFwdBufferInfo();
   }
 
   /**

@@ -137,7 +137,7 @@
   - [`hls.drift`](#hlsdrift)
   - [`hls.playingDate`](#hlsplayingdate)
 - [Runtime Events](#runtime-events)
-- [Loader Composition](#loader-composition)
+- [Creating a Custom Loader](#creating-a-custom-loader)
 - [Errors](#errors)
   - [Network Errors](#network-errors)
   - [Media Errors](#media-errors)
@@ -209,17 +209,17 @@ You need to provide manifest URL as below:
   if (Hls.isSupported()) {
     var video = document.getElementById('video');
     var hls = new Hls();
-    // bind them together
-    hls.attachMedia(video);
     hls.on(Hls.Events.MEDIA_ATTACHED, function () {
       console.log('video and hls.js are now bound together !');
-      hls.loadSource('http://my.streamURL.com/playlist.m3u8');
-      hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
-        console.log(
-          'manifest loaded, found ' + data.levels.length + ' quality level'
-        );
-      });
     });
+    hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+      console.log(
+        'manifest loaded, found ' + data.levels.length + ' quality level'
+      );
+    });
+    hls.loadSource('http://my.streamURL.com/playlist.m3u8');
+    // bind them together
+    hls.attachMedia(video);
   }
 </script>
 ```
@@ -1474,6 +1474,8 @@ Full list of Events is available below:
   - data: { startOffset, endOffset, type: SourceBufferName }
 - `Hls.Events.BUFFER_FLUSHED` - fired when the media buffer has been flushed
   - data: { type: SourceBufferName }
+- `Hls.Events.BACK_BUFFER_REACHED` - fired when the back buffer is reached as defined by the [backBufferLength](#backbufferlength) config option
+  - data: { bufferEnd: number }
 - `Hls.Events.MANIFEST_LOADING` - fired to signal that a manifest loading starts
   - data: { url : manifestURL }
 - `Hls.Events.MANIFEST_LOADED` - fired after manifest has been loaded
@@ -1550,7 +1552,7 @@ Full list of Events is available below:
   - data: { frag : fragment object }
 - `Hls.Events.KEY_LOADED` - fired when a decryption key loading is completed
   - data: { frag : fragment object }
-- `Hls.Events.STREAM_STATE_TRANSITION` - fired upon stream controller state transitions
+- `Hls.Events.STREAM_STATE_TRANSITION` - [deprecated]
 - `Hls.Events.NON_NATIVE_TEXT_TRACKS_FOUND` - When `renderTextTracksNatively` is `false`, this event will fire when a new captions or subtitle track is found, in the place of adding a TextTrack to the video element.
   - data: { tracks: Array<{ label, kind, default, subtitleTrack }> }
 - `Hls.Events.CUES_PARSED` - When `renderTextTracksNatively` is `false`, this event will fire when new captions or subtitle cues are parsed.

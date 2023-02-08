@@ -47,12 +47,11 @@ class MP4Demuxer implements Demuxer {
   public resetTimeStamp() {}
 
   public resetInitSegment(
-    initSegment: Uint8Array,
+    initSegment: Uint8Array | undefined,
     audioCodec: string | undefined,
     videoCodec: string | undefined,
     trackDuration: number
   ) {
-    const initData = parseInitSegment(initSegment);
     const videoTrack = (this.videoTrack = dummyTrack(
       'video',
       1
@@ -68,6 +67,11 @@ class MP4Demuxer implements Demuxer {
 
     this.id3Track = dummyTrack('id3', 1) as DemuxedMetadataTrack;
     this.timeOffset = 0;
+
+    if (!initSegment || !initSegment.byteLength) {
+      return;
+    }
+    const initData = parseInitSegment(initSegment);
 
     if (initData.video) {
       const { id, timescale, codec } = initData.video;
@@ -154,7 +158,8 @@ class MP4Demuxer implements Demuxer {
       let earliestPresentationTime = 0;
       const sidxInfo = parseEarlieastPresentationTime(videoTrack.samples);
       if (sidxInfo) {
-        earliestPresentationTime = sidxInfo.earliestPresentationTime / sidxInfo.timescale;
+        earliestPresentationTime =
+          sidxInfo.earliestPresentationTime / sidxInfo.timescale;
       }
       const emsgs = findBox(videoTrack.samples, ['emsg']);
       if (emsgs) {
@@ -163,7 +168,8 @@ class MP4Demuxer implements Demuxer {
           if (emsgSchemePattern.test(emsgInfo.schemeIdUri)) {
             const pts = !Number.isFinite(emsgInfo.presentationTimeDelta)
               ? emsgInfo.presentationTime! / emsgInfo.timeScale
-              : timeOffset + earliestPresentationTime +
+              : timeOffset +
+                earliestPresentationTime +
                 emsgInfo.presentationTimeDelta! / emsgInfo.timeScale;
             let duration =
               emsgInfo.eventDuration === 0xffffffff

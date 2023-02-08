@@ -7,9 +7,10 @@ import { FragmentState } from './fragment-tracker';
 import BaseStreamController, { State } from './base-stream-controller';
 import { PlaylistLevelType } from '../types/loader';
 import { Level } from '../types/level';
-import type { FragmentTracker } from './fragment-tracker';
 import type { NetworkComponentAPI } from '../types/component-api';
 import type Hls from '../hls';
+import type { FragmentTracker } from './fragment-tracker';
+import type KeyLoader from '../loader/key-loader';
 import type { LevelDetails } from '../loader/level-details';
 import type { Fragment } from '../loader/fragment';
 import type {
@@ -41,8 +42,12 @@ export class SubtitleStreamController
   private tracksBuffered: Array<TimeRange[]> = [];
   private mainDetails: LevelDetails | null = null;
 
-  constructor(hls: Hls, fragmentTracker: FragmentTracker) {
-    super(hls, fragmentTracker, '[subtitle-stream-controller]');
+  constructor(
+    hls: Hls,
+    fragmentTracker: FragmentTracker,
+    keyLoader: KeyLoader
+  ) {
+    super(hls, fragmentTracker, keyLoader, '[subtitle-stream-controller]');
     this._registerListeners();
   }
 
@@ -199,8 +204,8 @@ export class SubtitleStreamController
       return;
     }
 
-    if (this.fragCurrent?.loader) {
-      this.fragCurrent.loader.abort();
+    if (this.fragCurrent) {
+      this.fragCurrent.abortRequests();
     }
 
     this.state = State.IDLE;
@@ -336,7 +341,7 @@ export class SubtitleStreamController
       const startTime = performance.now();
       // decrypt the subtitles
       this.decrypter
-        .webCryptoDecrypt(
+        .decrypt(
           new Uint8Array(payload),
           decryptData.key.buffer,
           decryptData.iv.buffer
@@ -351,6 +356,10 @@ export class SubtitleStreamController
               tdecrypt: endTime,
             },
           });
+        })
+        .catch((err) => {
+          this.warn(`${err.name}: ${err.message}`);
+          this.state = State.IDLE;
         });
     }
   }
@@ -402,7 +411,7 @@ export class SubtitleStreamController
       const fragLen = fragments.length;
       const end = trackDetails.edge;
 
-      let foundFrag: Fragment | null;
+      let foundFrag: Fragment | null = null;
       const fragPrevious = this.fragPrevious;
       if (targetBufferTime < end) {
         const { maxFragLookUpTolerance } = config;
@@ -422,22 +431,15 @@ export class SubtitleStreamController
       } else {
         foundFrag = fragments[fragLen - 1];
       }
-
-      foundFrag = this.mapToInitFragWhenRequired(foundFrag);
       if (!foundFrag) {
         return;
       }
 
-      // only load if fragment is not loaded
+      foundFrag = this.mapToInitFragWhenRequired(foundFrag) as Fragment;
       if (
-        this.fragmentTracker.getState(foundFrag) !== FragmentState.NOT_LOADED
+        this.fragmentTracker.getState(foundFrag) === FragmentState.NOT_LOADED
       ) {
-        return;
-      }
-
-      if (foundFrag.encrypted) {
-        this.loadKey(foundFrag, trackDetails);
-      } else {
+        // only load if fragment is not loaded
         this.loadFragment(foundFrag, trackDetails, targetBufferTime);
       }
     }
@@ -458,7 +460,7 @@ export class SubtitleStreamController
   ) {
     this.fragCurrent = frag;
     if (frag.sn === 'initSegment') {
-      this._loadInitSegment(frag);
+      this._loadInitSegment(frag, levelDetails);
     } else {
       this.startFragRequested = true;
       super.loadFragment(frag, levelDetails, targetBufferTime);

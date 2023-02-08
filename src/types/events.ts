@@ -74,6 +74,10 @@ export interface BufferFlushedData {
   type: SourceBufferName;
 }
 
+export interface VideoPTSNeededCC {
+  cc: number;
+}
+
 export interface ManifestLoadingData {
   url: string;
 }

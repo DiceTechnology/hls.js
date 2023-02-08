@@ -48,10 +48,13 @@ class AudioStreamController
   implements NetworkComponentAPI
 {
   private videoBuffer: Bufferable | null = null;
+  /** The current CC of the video track. */
   private videoTrackCC: number = -1;
+  /** The CC of the video track at the time `this.waitingData` was put on hold. */
   private waitingVideoCC: number = -1;
   private audioSwitch: boolean = false;
   private trackId: number = -1;
+  /** A pending audio fragment that loaded but cannot be buffered yet as it's initPTS is unknown. */
   private waitingData: WaitingForPTSData | null = null;
   private mainDetails: LevelDetails | null = null;
   private bufferFlushed: boolean = false;
@@ -166,7 +169,7 @@ class AudioStreamController
           if (this.waitForCdnTuneIn(details)) {
             break;
           }
-          this.state = State.WAITING_INIT_PTS;
+          this.state = State.IDLE;
         }
         break;
       }
@@ -189,6 +192,7 @@ class AudioStreamController
           if (this.initPTS[frag.cc] !== undefined) {
             this.waitingData = null;
             this.waitingVideoCC = -1;
+            this.videoTrackCC = -1;
             this.state = State.FRAG_LOADING;
             const payload = cache.flush();
             const data: FragLoadedData = {
@@ -225,6 +229,10 @@ class AudioStreamController
                 `Waiting fragment cc (${frag.cc}) @ ${frag.start} cancelled because another fragment at ${bufferInfo.end} is needed`
               );
               this.clearWaitingFragment();
+            } else {
+              if (this.waitingVideoCC !== -1 && frag.cc < this.waitingVideoCC) {
+                this.hls.trigger(Events.VIDEO_PTS_NEEDED, { cc: frag.cc });
+              }
             }
           }
         } else {
@@ -836,11 +844,6 @@ class AudioStreamController
     ) {
       if (frag.sn === 'initSegment') {
         this._loadInitSegment(frag, trackDetails);
-      } else if (trackDetails.live && !Number.isFinite(this.initPTS[frag.cc])) {
-        this.log(
-          `Waiting for video PTS in continuity counter ${frag.cc} of live stream before loading audio fragment ${frag.sn} of level ${this.trackId}`
-        );
-        this.state = State.WAITING_INIT_PTS;
       } else {
         this.startFragRequested = true;
         super.loadFragment(frag, trackDetails, targetBufferTime);

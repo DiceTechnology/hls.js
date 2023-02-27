@@ -92,6 +92,7 @@ export default class BaseStreamController
   protected startFragRequested: boolean = false;
   protected decrypter: Decrypter;
   protected initPTS: Array<number> = [];
+  protected reAlignCC: number | null = null;
   protected onvseeking: EventListener | null = null;
   protected onvended: EventListener | null = null;
 
@@ -581,6 +582,9 @@ export default class BaseStreamController
       keyLoadingPromise = this.keyLoader.load(frag).then((keyLoadedData) => {
         if (!this.fragContextChanged(keyLoadedData.frag)) {
           this.hls.trigger(Events.KEY_LOADED, keyLoadedData);
+          if (this.state === State.KEY_LOADING) {
+            this.state = State.IDLE;
+          }
           return keyLoadedData;
         }
       });
@@ -1114,19 +1118,35 @@ export default class BaseStreamController
     }
 
     let frag;
-    if (bufferEnd < end) {
-      const lookupTolerance = bufferEnd > end - tolerance ? 0 : tolerance;
-      // Remove the tolerance if it would put the bufferEnd past the actual end of stream
-      // Uses buffer and sequence number to calculate switch segment (required if using EXT-X-DISCONTINUITY-SEQUENCE)
-      frag = findFragmentByPTS(
-        fragPrevious,
-        fragments,
-        bufferEnd,
-        lookupTolerance
+    if (this.reAlignCC != null && this.fragPrevious?.cc !== this.reAlignCC) {
+      const fragmentsWithMatchingCC = fragments.filter(
+        (fragment) => fragment.cc === this.reAlignCC
       );
-    } else {
-      // reach end of playlist
-      frag = fragments[fragments.length - 1];
+
+      // Use the last fragment with matching CC as this issue generally occurs at the end of discontinuities
+      // with slightly offset audio / video manifests.
+      frag = fragmentsWithMatchingCC[fragmentsWithMatchingCC.length - 1];
+      this.reAlignCC = null;
+      logger.info(
+        `Loading video segment ${frag.sn} (cc: ${frag.cc}) to get initPTS for audio-stream-controller.`
+      );
+    }
+
+    if (!frag) {
+      if (bufferEnd < end) {
+        const lookupTolerance = bufferEnd > end - tolerance ? 0 : tolerance;
+        // Remove the tolerance if it would put the bufferEnd past the actual end of stream
+        // Uses buffer and sequence number to calculate switch segment (required if using EXT-X-DISCONTINUITY-SEQUENCE)
+        frag = findFragmentByPTS(
+          fragPrevious,
+          fragments,
+          bufferEnd,
+          lookupTolerance
+        );
+      } else {
+        // reach end of playlist
+        frag = fragments[fragments.length - 1];
+      }
     }
 
     if (frag) {

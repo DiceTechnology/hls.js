@@ -49,6 +49,7 @@ export default class MP4Remuxer implements Remuxer {
   private nextAudioPts: number | null = null;
   private videoSampleDuration: number | null = null;
   private isAudioContiguous: boolean = false;
+  private isDiscontinuity: boolean = false;
   private isVideoContiguous: boolean = false;
   private videoTrackConfig?: {
     width?: number;
@@ -86,6 +87,7 @@ export default class MP4Remuxer implements Remuxer {
   resetTimeStamp(defaultTimeStamp: RationalTimestamp | null) {
     logger.log('[mp4-remuxer]: initPTS & initDTS reset');
     this._initPTS = this._initDTS = defaultTimeStamp;
+    this.isDiscontinuity = true;
   }
 
   resetNextTimestamp() {
@@ -182,7 +184,11 @@ export default class MP4Remuxer implements Remuxer {
 
       if (enoughVideoSamples) {
         firstKeyFrameIndex = findKeyframeIndex(videoTrack.samples);
-        if (!isVideoContiguous && this.config.forceKeyFrameOnDiscontinuity) {
+        if (
+          this.config.forceKeyFrameOnDiscontinuity &&
+          (!isVideoContiguous ||
+            (this.isDiscontinuity && firstKeyFrameIndex > 0))
+        ) {
           independent = true;
           if (firstKeyFrameIndex > 0) {
             logger.warn(
@@ -190,6 +196,9 @@ export default class MP4Remuxer implements Remuxer {
             );
             const startPTS = this.getVideoStartPts(videoTrack.samples);
             videoTrack.samples = videoTrack.samples.slice(firstKeyFrameIndex);
+            if (this.isDiscontinuity) {
+              firstKeyFrameIndex = 0;
+            }
             videoTrack.dropped += firstKeyFrameIndex;
             videoTimeOffset +=
               (videoTrack.samples[0].pts - startPTS) /

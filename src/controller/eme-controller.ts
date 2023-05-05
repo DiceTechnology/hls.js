@@ -291,6 +291,7 @@ class EMEController implements ComponentAPI {
                   certificate,
                 );
               }
+              this.attemptSetMediaKeys(keySystem, mediaKeys);
               return mediaKeys;
             });
           });

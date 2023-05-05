@@ -28,9 +28,15 @@ declare global {
 
 const MIN_CUE_DURATION = 0.25;
 
+const isPlayStation4 = () => {
+  return /PlayStation 4/i.test(navigator.userAgent);
+};
+
 function getCueClass(): typeof VTTCue | typeof TextTrackCue | undefined {
   if (typeof self === 'undefined') return undefined;
-  return self.VTTCue || self.TextTrackCue;
+  return ((!isPlayStation4() && self.WebKitDataCue) ||
+    self.VTTCue ||
+    self.TextTrackCue) as any;
 }
 
 function createCueWithDataFields(

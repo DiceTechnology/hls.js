@@ -418,6 +418,8 @@ export class BaseStreamController extends TaskLoop implements NetworkComponentAP
     // (undocumented)
     protected playlistType: PlaylistLevelType;
     // (undocumented)
+    protected reAlignCC: number | null;
+    // (undocumented)
     protected recoverWorkerError(data: ErrorData): void;
     // (undocumented)
     protected reduceLengthAndFlushBuffer(data: ErrorData): boolean;
@@ -1201,7 +1203,9 @@ export enum Events {
     // (undocumented)
     SUBTITLE_TRACKS_CLEARED = "hlsSubtitleTracksCleared",
     // (undocumented)
-    SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated"
+    SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated",
+    // (undocumented)
+    VIDEO_PTS_NEEDED = "hlsVideoPtsNeeded"
 }
 
 // Warning: (ae-missing-release-tag) "FPSController" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -1783,6 +1787,10 @@ export interface HlsListeners {
     [Events.SUBTITLE_TRACKS_UPDATED]: (event: Events.SUBTITLE_TRACKS_UPDATED, data: SubtitleTracksUpdatedData) => void;
     // (undocumented)
     [Events.SUBTITLE_TRACK_SWITCH]: (event: Events.SUBTITLE_TRACK_SWITCH, data: SubtitleTrackSwitchData) => void;
+    // Warning: (ae-forgotten-export) The symbol "VideoPTSNeededCC" needs to be exported by the entry point hls.d.ts
+    //
+    // (undocumented)
+    [Events.VIDEO_PTS_NEEDED]: (event: Events.VIDEO_PTS_NEEDED, data: VideoPTSNeededCC) => void;
 }
 
 // Warning: (ae-missing-release-tag) "HlsLoadPolicies" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -2054,6 +2062,7 @@ export interface LevelAttributes extends AttrList {
 // @public (undocumented)
 export type LevelControllerConfig = {
     startLevel?: number;
+    replaceCodecs: [string, string][];
 };
 
 // Warning: (ae-missing-release-tag) "LevelDetails" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)

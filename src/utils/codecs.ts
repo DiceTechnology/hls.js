@@ -77,6 +77,8 @@ const sampleEntryCodesISO = {
   },
 } as const;
 
+const MediaSource = getMediaSource();
+
 export type CodecType = 'audio' | 'video';
 
 export function isCodecType(codec: string, type: CodecType): boolean {
@@ -181,6 +183,13 @@ export function getCodecCompatibleName(
       m.toLowerCase() as LowerCaseCodecType,
       preferManagedMediaSource,
     ),
+  );
+}
+
+export function isCodecSupportedInMp4(codec: string, type: CodecType): boolean {
+  return (
+    MediaSource?.isTypeSupported(`${type || 'video'}/mp4;codecs="${codec}"`) ??
+    false
   );
 }
 

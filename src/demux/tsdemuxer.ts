@@ -136,7 +136,7 @@ class TSDemuxer implements Demuxer {
             return packetStart;
           }
         } else if (tsPackets) {
-          // Exit if sync word found, but does not contain contiguous packets
+          // Exit if sync word found, but does not contain contiguous packets (#5501)
           return -1;
         } else {
           break;

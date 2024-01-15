@@ -3,10 +3,11 @@
  */
 import BaseAudioDemuxer from './base-audio-demuxer';
 import * as ADTS from './adts';
-import { logger } from '../utils/logger';
-import * as ID3 from '../demux/id3';
-import type { HlsEventEmitter } from '../events';
-import type { HlsConfig } from '../config';
+import * as MpegAudio from './mpegaudio';
+import { logger } from '../../utils/logger';
+import * as ID3 from '../id3';
+import type { HlsEventEmitter } from '../../events';
+import type { HlsConfig } from '../../config';
 
 class AACDemuxer extends BaseAudioDemuxer {
   private readonly observer: HlsEventEmitter;
@@ -22,7 +23,7 @@ class AACDemuxer extends BaseAudioDemuxer {
     initSegment: Uint8Array | undefined,
     audioCodec: string | undefined,
     videoCodec: string | undefined,
-    trackDuration: number
+    trackDuration: number,
   ) {
     super.resetInitSegment(initSegment, audioCodec, videoCodec, trackDuration);
     this._audioTrack = {
@@ -41,7 +42,7 @@ class AACDemuxer extends BaseAudioDemuxer {
   }
 
   // Source for probe info - https://wiki.multimedia.cx/index.php?title=ADTS
-  static probe(data): boolean {
+  static probe(data: Uint8Array | undefined): boolean {
     if (!data) {
       return false;
     }
@@ -50,8 +51,12 @@ class AACDemuxer extends BaseAudioDemuxer {
     // Look for ADTS header | 1111 1111 | 1111 X00X | where X can be either 0 or 1
     // Layer bits (position 14 and 15) in header should be always 0 for ADTS
     // More info https://wiki.multimedia.cx/index.php?title=ADTS
-    const id3Data = ID3.getID3Data(data, 0) || [];
-    let offset = id3Data.length;
+    const id3Data = ID3.getID3Data(data, 0);
+    let offset = id3Data?.length || 0;
+
+    if (MpegAudio.probe(data, offset)) {
+      return false;
+    }
 
     for (let length = data.length; offset < length; offset++) {
       if (ADTS.probe(data, offset)) {
@@ -72,14 +77,14 @@ class AACDemuxer extends BaseAudioDemuxer {
       this.observer,
       data,
       offset,
-      track.manifestCodec
+      track.manifestCodec,
     );
     const frame = ADTS.appendFrame(
       track,
       data,
       offset,
       this.basePTS as number,
-      this.frameIndex
+      this.frameIndex,
     );
     if (frame && frame.missing === 0) {
       return frame;

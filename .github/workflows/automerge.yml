@@ -10,8 +10,11 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'automerge:run:${{ github.head_ref }}'
+      cancel-in-progress: true
     steps:
-      - uses: tjenkinson/gh-action-auto-merge-dependency-updates@01b22a97735b01be6bc1d8a2705f7ee167472414
+      - uses: tjenkinson/gh-action-auto-merge-dependency-updates@94a659f2eba4e787914b23e13ab2a28f46b5e1e6 # v1.3.5
         with:
           repo-token: ${{ secrets.CI_GITHUB_TOKEN }}
           allowed-actors: renovate[bot]

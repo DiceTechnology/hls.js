@@ -1,7 +1,7 @@
 /**
  *  MPEG parser helper
  */
-import { DemuxedAudioTrack } from '../types/demuxer';
+import { DemuxedAudioTrack } from '../../types/demuxer';
 
 let chromeVersion: number | null = null;
 
@@ -60,7 +60,7 @@ export function appendFrame(
   data: Uint8Array,
   offset: number,
   pts: number,
-  frameIndex: number
+  frameIndex: number,
 ) {
   // Using http://www.datavoyage.com/mpgscript/mpeghdr.htm as a reference
   if (offset + 24 > data.length) {

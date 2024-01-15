@@ -33,7 +33,7 @@ describe('CapLevelController', function () {
       const actual = CapLevelController.getMaxLevelByMediaSize(
         levels,
         300,
-        300
+        300,
       );
       expect(expected).to.equal(actual);
     });
@@ -43,7 +43,7 @@ describe('CapLevelController', function () {
       const actual = CapLevelController.getMaxLevelByMediaSize(
         levels,
         500,
-        500
+        500,
       );
       expect(expected).to.equal(actual);
     });
@@ -53,7 +53,7 @@ describe('CapLevelController', function () {
       const actual = CapLevelController.getMaxLevelByMediaSize(
         levels,
         5000,
-        5000
+        5000,
       );
       expect(expected).to.equal(actual);
     });
@@ -69,7 +69,7 @@ describe('CapLevelController', function () {
       const actual = CapLevelController.getMaxLevelByMediaSize(
         undefined,
         5000,
-        5000
+        5000,
       );
       expect(expected).to.equal(actual);
     });
@@ -79,6 +79,7 @@ describe('CapLevelController', function () {
     let hls;
     let media;
     let capLevelController;
+
     beforeEach(function () {
       const fixture = document.createElement('div');
       fixture.id = 'test-fixture';
@@ -86,7 +87,7 @@ describe('CapLevelController', function () {
 
       hls = new Hls({ capLevelToPlayerSize: true });
       media = document.createElement('video');
-      capLevelController = new CapLevelController(hls);
+      capLevelController = hls.capLevelController;
       capLevelController.onMediaAttaching(Events.MEDIA_ATTACHING, {
         media,
       });
@@ -100,6 +101,7 @@ describe('CapLevelController', function () {
         media.parentNode.removeChild(media);
       }
       document.body.removeChild(document.querySelector('#test-fixture'));
+      hls.destroy();
     });
 
     it('gets 0 for width and height when the media element is not in the DOM', function () {
@@ -135,7 +137,7 @@ describe('CapLevelController', function () {
 
     it('gets valid width and height when the media element is attached after onManifestParsed', function () {
       hls = new Hls({ capLevelToPlayerSize: true });
-      capLevelController = new CapLevelController(hls);
+      capLevelController = hls.capLevelController;
       capLevelController.onManifestParsed(Events.MANIFEST_PARSED, {
         levels,
       });
@@ -165,28 +167,29 @@ describe('CapLevelController', function () {
   describe('initialization', function () {
     let hls;
     let capLevelController;
-    let firstLevelSpy;
     let startCappingSpy;
     let stopCappingSpy;
     beforeEach(function () {
       hls = new Hls({ capLevelToPlayerSize: true });
-      firstLevelSpy = sinon.spy(hls, 'firstLevel', ['set']);
-      capLevelController = new CapLevelController(hls);
+      capLevelController = hls.capLevelController;
       startCappingSpy = sinon.spy(capLevelController, 'startCapping');
       stopCappingSpy = sinon.spy(capLevelController, 'stopCapping');
+    });
+
+    this.afterEach(function () {
+      hls.destroy();
     });
 
     describe('start and stop', function () {
       it('immediately caps and sets a timer for monitoring size size', function () {
         const detectPlayerSizeSpy = sinon.spy(
           capLevelController,
-          'detectPlayerSize'
+          'detectPlayerSize',
         );
         capLevelController.startCapping();
 
         expect(capLevelController.timer).to.exist;
-        expect(firstLevelSpy.set.calledOnce).to.be.true;
-        expect(detectPlayerSizeSpy.calledOnce).to.be.true;
+        expect(detectPlayerSizeSpy.callCount).to.equal(1);
       });
 
       it('stops the capping timer and resets capping', function () {
@@ -195,7 +198,7 @@ describe('CapLevelController', function () {
         capLevelController.stopCapping();
 
         expect(capLevelController.autoLevelCapping).to.equal(
-          Number.POSITIVE_INFINITY
+          Number.POSITIVE_INFINITY,
         );
         expect(capLevelController.restrictedLevels).to.be.empty;
         expect(capLevelController.firstLevel).to.equal(-1);
@@ -207,10 +210,8 @@ describe('CapLevelController', function () {
       expect(capLevelController.restrictedLevels).to.be.empty;
       expect(capLevelController.timer).to.not.exist;
       expect(capLevelController.autoLevelCapping).to.equal(
-        Number.POSITIVE_INFINITY
+        Number.POSITIVE_INFINITY,
       );
-
-      expect(firstLevelSpy.set.notCalled).to.be.true;
     });
 
     it('starts capping on BUFFER_CODECS only if video is found', function () {

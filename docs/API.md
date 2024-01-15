@@ -28,6 +28,7 @@ See [API Reference](https://hlsjs-dev.video-dev.org/api-docs/) for a complete li
   - [`initialLiveManifestSize`](#initiallivemanifestsize)
   - [`maxBufferLength`](#maxbufferlength)
   - [`backBufferLength`](#backbufferlength)
+  - [`frontBufferFlushThreshold`](#frontbufferflushthreshold)
   - [`maxBufferSize`](#maxbuffersize)
   - [`maxBufferHole`](#maxbufferhole)
   - [`maxStarvationDelay`](#maxstarvationdelay)
@@ -45,6 +46,7 @@ See [API Reference](https://hlsjs-dev.video-dev.org/api-docs/) for a complete li
   - [`maxLiveSyncPlaybackRate`](#maxlivesyncplaybackrate)
   - [`liveDurationInfinity`](#livedurationinfinity)
   - [`liveBackBufferLength` (deprecated)](#livebackbufferlength-deprecated)
+  - [`preferManagedMediaSource`](#prefermanagedmediasource)
   - [`enableWorker`](#enableworker)
   - [`workerPath`](#workerpath)
   - [`enableSoftwareAES`](#enablesoftwareaes)
@@ -64,6 +66,7 @@ See [API Reference](https://hlsjs-dev.video-dev.org/api-docs/) for a complete li
       - [`retryDelayMs: number`](#retrydelayms-number)
       - [`maxRetryDelayMs: number`](#maxretrydelayms-number)
       - [`backoff?: 'exponential' | 'linear'`](#backoff-exponential--linear)
+      - [`shouldRetry`](#shouldretry)
   - [`startFragPrefetch`](#startfragprefetch)
   - [`testBandwidth`](#testbandwidth)
   - [`progressive`](#progressive)
@@ -76,6 +79,9 @@ See [API Reference](https://hlsjs-dev.video-dev.org/api-docs/) for a complete li
   - [`pLoader`](#ploader)
   - [`xhrSetup`](#xhrsetup)
   - [`fetchSetup`](#fetchsetup)
+  - [`videoPreference`](#videopreference)
+  - [`audioPreference`](#audiopreference)
+  - [`subtitlePreference`](#subtitlepreference)
   - [`abrController`](#abrcontroller)
   - [`bufferController`](#buffercontroller)
   - [`capLevelController`](#caplevelcontroller)
@@ -104,6 +110,7 @@ See [API Reference](https://hlsjs-dev.video-dev.org/api-docs/) for a complete li
   - [`abrEwmaFastVoD`](#abrewmafastvod)
   - [`abrEwmaSlowVoD`](#abrewmaslowvod)
   - [`abrEwmaDefaultEstimate`](#abrewmadefaultestimate)
+  - [`abrEwmaDefaultEstimateMax`](#abrewmadefaultestimatemax)
   - [`abrBandWidthFactor`](#abrbandwidthfactor)
   - [`abrBandWidthUpFactor`](#abrbandwidthupfactor)
   - [`abrMaxWithRealBitrate`](#abrmaxwithrealbitrate)
@@ -128,6 +135,7 @@ See [API Reference](https://hlsjs-dev.video-dev.org/api-docs/) for a complete li
   - [`hls.loadLevel`](#hlsloadlevel)
   - [`hls.nextLoadLevel`](#hlsnextloadlevel)
   - [`hls.firstLevel`](#hlsfirstlevel)
+  - [`hls.firstAutoLevel`](#hlsfirstautolevel)
   - [`hls.startLevel`](#hlsstartlevel)
   - [`hls.autoLevelEnabled`](#hlsautolevelenabled)
   - [`hls.autoLevelCapping`](#hlsautolevelcapping)
@@ -141,9 +149,13 @@ See [API Reference](https://hlsjs-dev.video-dev.org/api-docs/) for a complete li
   - [`hls.startLoad(startPosition=-1)`](#hlsstartloadstartposition-1)
   - [`hls.stopLoad()`](#hlsstopload)
 - [Audio Tracks Control API](#audio-tracks-control-api)
+  - [`hls.setAudioOption(audioOption)`](#hlssetaudiooptionaudiooption)
+  - [`hls.allAudioTracks`](#hlsallaudiotracks)
   - [`hls.audioTracks`](#hlsaudiotracks)
   - [`hls.audioTrack`](#hlsaudiotrack)
 - [Subtitle Tracks Control API](#subtitle-tracks-control-api)
+  - [`hls.setSubtitleOption(subtitleOption)`](#hlssetsubtitleoptionsubtitleoption)
+  - [`hls.allSubtitleTracks`](#hlsallsubtitletracks)
   - [`hls.subtitleTracks`](#hlssubtitletracks)
   - [`hls.subtitleTrack`](#hlssubtitletrack)
   - [`hls.subtitleDisplay`](#hlssubtitledisplay)
@@ -179,15 +191,26 @@ First include `https://cdn.jsdelivr.net/npm/hls.js@1` (or `/hls.js` for unminifi
 <script src="//cdn.jsdelivr.net/npm/hls.js@1"></script>
 ```
 
-Invoke the following static method: `Hls.isSupported()` to check whether your browser is supporting [MediaSource Extensions](http://w3c.github.io/media-source/).
+Invoke the following static method: `Hls.isSupported()` to check whether your browser supports [MediaSource Extensions](http://w3c.github.io/media-source/) with any baseline codecs.
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 <script>
   if (Hls.isSupported()) {
-    console.log('hello hls.js!');
+    console.log('Hello HLS.js!');
   }
 </script>
+```
+
+If you want to test for MSE support without testing for baseline codecs, use `isMSESupported`:
+
+```js
+if (
+  Hls.isMSESupported() &&
+  Hls.getMediaSource().isTypeSupported('video/mp4;codecs="av01.0.01M.08"')
+) {
+  console.log('Hello AV1 playback! AVC who?');
+}
 ```
 
 ### Second step: instantiate Hls object and bind it to `<video>` element
@@ -205,7 +228,13 @@ Let's
 <script>
   if (Hls.isSupported()) {
     var video = document.getElementById('video');
+
+    // If you are using the ESM version of the library (hls.mjs), you
+    // should specify the "workerPath" config option here if you want
+    // web workers to be used. Note that bundlers (such as webpack)
+    // will likely use the ESM version by default.
     var hls = new Hls();
+
     // bind them together
     hls.attachMedia(video);
     // MEDIA_ATTACHED event is fired by hls object once MediaSource is ready
@@ -233,7 +262,7 @@ You need to provide manifest URL as below:
     });
     hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
       console.log(
-        'manifest loaded, found ' + data.levels.length + ' quality level'
+        'manifest loaded, found ' + data.levels.length + ' quality level',
       );
     });
     hls.loadSource('http://my.streamURL.com/playlist.m3u8');
@@ -355,6 +384,7 @@ var config = {
   maxBufferLength: 30,
   maxMaxBufferLength: 600,
   backBufferLength: Infinity,
+  frontBufferFlushThreshold: Infinity,
   maxBufferSize: 60 * 1000 * 1000,
   maxBufferHole: 0.5,
   highBufferWatchdogPeriod: 2,
@@ -364,21 +394,33 @@ var config = {
   liveSyncDurationCount: 3,
   liveMaxLatencyDurationCount: Infinity,
   liveDurationInfinity: false,
+  preferManagedMediaSource: false,
   enableWorker: true,
   enableSoftwareAES: true,
-  manifestLoadingTimeOut: 10000,
-  manifestLoadingMaxRetry: 1,
-  manifestLoadingRetryDelay: 1000,
-  manifestLoadingMaxRetryTimeout: 64000,
+  fragLoadPolicy: {
+    default: {
+      maxTimeToFirstByteMs: 9000,
+      maxLoadTimeMs: 100000,
+      timeoutRetry: {
+        maxNumRetry: 2,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+      errorRetry: {
+        maxNumRetry: 5,
+        retryDelayMs: 3000,
+        maxRetryDelayMs: 15000,
+        backoff: 'linear',
+      },
+    },
+  },
   startLevel: undefined,
-  levelLoadingTimeOut: 10000,
-  levelLoadingMaxRetry: 4,
-  levelLoadingRetryDelay: 1000,
-  levelLoadingMaxRetryTimeout: 64000,
-  fragLoadingTimeOut: 20000,
-  fragLoadingMaxRetry: 6,
-  fragLoadingRetryDelay: 1000,
-  fragLoadingMaxRetryTimeout: 64000,
+  audioPreference: {
+    characteristics: 'public.accessibility.describes-video',
+  },
+  subtitlePreference: {
+    lang: 'en-US',
+  },
   startFragPrefetch: false,
   testBandwidth: true,
   progressive: false,
@@ -410,6 +452,7 @@ var config = {
   abrEwmaFastVoD: 3.0,
   abrEwmaSlowVoD: 9.0,
   abrEwmaDefaultEstimate: 500000,
+  abrEwmaDefaultEstimateMax: 5000000,
   abrBandWidthFactor: 0.95,
   abrBandWidthUpFactor: 0.7,
   abrMaxWithRealBitrate: false,
@@ -421,7 +464,11 @@ var config = {
   drmSystems: {},
   drmSystemOptions: {},
   requestMediaKeySystemAccessFunc: requestMediaKeySystemAccess,
-  cmcd: undefined,
+  cmcd: {
+    sessionId: uuid(),
+    contentId: hash(contentURL),
+    useHeaders: false,
+  },
 };
 
 var hls = new Hls(config);
@@ -506,7 +553,13 @@ This is the guaranteed buffer length hls.js will try to reach, regardless of max
 
 (default: `Infinity`)
 
-The maximum duration of buffered media to keep once it has been played, in seconds. Any video buffered past this duration will be evicted. `Infinity` means no restriction on back buffer length; `0` keeps the minimum amount. The minimum amount is equal to the target duration of a segment to ensure that current playback is not interrupted.
+The maximum duration of buffered media to keep once it has been played, in seconds. Any video buffered past this duration will be evicted. `Infinity` means no restriction on back buffer length; `0` keeps the minimum amount. The minimum amount is equal to the target duration of a segment to ensure that current playback is not interrupted. Keep in mind, the browser can and does evict media from the buffer on its own, so with the `Infinity` setting, hls.js will let the browser do what it needs to do. (Ref: the MSE spec under [coded frame eviction](https://www.w3.org/TR/media-source-2/#sourcebuffer-coded-frame-eviction)).
+
+### `frontBufferFlushThreshold`
+
+(default: `Infinity`)
+
+The maximum duration of buffered media, in seconds, from the play position to keep before evicting non-contiguous forward ranges. A value of `Infinity` means no active eviction will take place; This value will always be at least the `maxBufferLength`.
 
 ### `maxBufferSize`
 
@@ -654,6 +707,12 @@ If you want to have a native Live UI in environments like iOS Safari, Safari, An
 
 `liveBackBufferLength` has been deprecated. Use `backBufferLength` instead.
 
+### `preferManagedMediaSource`
+
+(default `true`)
+
+HLS.js uses the Managed Media Source API (`ManagedMediaSource` global) instead of the `MediaSource` global by default when present. Setting this to `false` will only use `ManagedMediaSource` when `MediaSource` is undefined.
+
 ### `enableWorker`
 
 (default: `true`)
@@ -665,6 +724,8 @@ Enable WebWorker (if available on browser) for TS demuxing/MP4 remuxing, to impr
 (default: `null`)
 
 Provide a path to hls.worker.js as an alternative to injecting the worker based on the iife library wrapper function. When `workerPath` is defined as a string, the transmuxer interface will initialize a WebWorker using the resolved `workerPath` URL.
+
+When using the ESM version of the library (hls.mjs), this option is required in order for web workers to be used.
 
 ### `enableSoftwareAES`
 
@@ -867,6 +928,12 @@ Maximum delay between retries in milliseconds. With each retry, the delay is inc
 ##### `backoff?: 'exponential' | 'linear'`
 
 Used to determine retry backoff duration: Retry delay = 2^retryCount \* retryDelayMs (exponential).
+
+##### `shouldRetry`
+
+(default: internal shouldRetry function, type: `(retryConfig: RetryConfig | null | undefined, retryCount: number, isTimeout: boolean, httpStatus: number | undefined,retry: boolean) => boolean`)
+
+Override default shouldRetry check
 
 ### `startFragPrefetch`
 
@@ -1089,6 +1156,34 @@ var config = {
   },
 };
 ```
+
+### `videoPreference`
+
+(default `undefined`)
+
+These settings determine whether HDR video should be selected before SDR video. Which VIDEO-RANGE values are allowed, and in what order of priority can also be specified.
+
+Format `{ preferHDR: boolean, allowedVideoRanges: ('SDR' | 'PQ' | 'HLG')[] }`
+
+- Allow all video ranges if `allowedVideoRanges` is unspecified.
+- If `preferHDR` is defined, use the value to filter `allowedVideoRanges`.
+- Else check window for HDR support and set `preferHDR` to the result.
+
+When `preferHDR` is set, skip checking if the window supports HDR and instead use the value provided to determine level selection preference via dynamic range. A value of `preferHDR === true` will attempt to use HDR levels before selecting from SDR levels.
+
+`allowedVideoRanges` can restrict playback to a limited set of VIDEO-RANGE transfer functions and set their priority for selection. For example, to ignore all HDR variants, set `allowedVideoRanges` to `['SDR']`. Or, to ignore all HLG variants, set `allowedVideoRanges` to `['SDR', 'PQ']`. To prioritize PQ variants over HLG, set `allowedVideoRanges` to `['SDR', 'HLG', 'PQ']`.
+
+### `audioPreference`
+
+(default: `undefined`)
+
+Set a preference used to find and select the best matching audio track on start. The selection can influence starting level selection based on the audio group(s) available to match the preference. `audioPreference` accepts a value of an audio track object (MediaPlaylist), AudioSelectionOption (track fields to match), or undefined. If not set or set to a value of `undefined`, HLS.js will auto select a default track on start.
+
+### `subtitlePreference`
+
+(default: `undefined`)
+
+Set a preference used to find and select the best matching subtitle track on start. `subtitlePreference` accepts a value of a subtitle track object (MediaPlaylist), SubtitleSelectionOption (track fields to match), or undefined. If not set or set to a value of `undefined`, HLS.js will not enable subtitles unless there is a default or forced option.
 
 ### `abrController`
 
@@ -1342,6 +1437,12 @@ parameter should be a float greater than [abrEwmaFastVoD](#abrewmafastvod)
 
 Default bandwidth estimate in bits/s prior to collecting fragment bandwidth samples.
 
+### `abrEwmaDefaultEstimateMax`
+
+(default: `5000000`)
+
+Limits value of updated bandwidth estimate taken from first variant found in multivariant playlist on start.
+
 ### `abrBandWidthFactor`
 
 (default: `0.95`)
@@ -1585,7 +1686,11 @@ Set to `-1` for automatic level selection.
 
 ### `hls.firstLevel`
 
-- get: First level index (index of first level appearing in Manifest. it is usually defined as start level hint for player).
+- get: First level index (index of the first Variant appearing in the Multivariant Playlist).
+
+### `hls.firstAutoLevel`
+
+- get: Return quality level that will be used to load the first fragment when not overridden by `startLevel`.
 
 ### `hls.startLevel`
 
@@ -1622,6 +1727,8 @@ Default value is set via [`capLevelToPlayerSize`](#capleveltoplayersize) in conf
 
 get: Returns the current bandwidth estimate in bits/s, if available. Otherwise, `NaN` is returned.
 
+set: Reset `EwmaBandWidthEstimator` using the value set as the new default estimate. This will update the value of `config.abrEwmaDefaultEstimate`.
+
 ### `hls.removeLevel(levelIndex, urlId)`
 
 Remove a loaded level from the list of levels, or a url from a level's list of redundant urls.
@@ -1655,23 +1762,39 @@ stop playlist/fragment loading. could be resumed later on by calling `hls.startL
 
 ## Audio Tracks Control API
 
+### `hls.setAudioOption(audioOption)`
+
+Find and select the best matching audio track, making a level switch when a Group change is necessary. Updates `hls.config.audioPreference`. Returns the selected track or null when no matching track is found.
+
+### `hls.allAudioTracks`
+
+get : array of all supported audio tracks found in the Multivariant Playlist
+
 ### `hls.audioTracks`
 
-get : array of audio tracks exposed in manifest
+get : array of supported audio tracks in the active audio group ID
 
 ### `hls.audioTrack`
 
-get/set : audio track id (returned by)
+get/set : index of selected audio track in `hls.audioTracks`
 
 ## Subtitle Tracks Control API
 
+### `hls.setSubtitleOption(subtitleOption)`
+
+Find and select the best matching subtitle track, making a level switch when a Group change is necessary. Updates `hls.config.subtitlePreference`. Returns the selected track or null when no matching track is found.
+
+### `hls.allSubtitleTracks`
+
+get : array of all subtitle tracks found in the Multivariant Playlist
+
 ### `hls.subtitleTracks`
 
-get : array of subtitle tracks exposed in manifest
+get : array of subtitle tracks in the active subtitle group ID
 
 ### `hls.subtitleTrack`
 
-get/set : subtitle track id (returned by). Returns -1 if no track is visible. Set to -1 to disable all subtitle tracks.
+get/set : index of selected subtitle track in `hls.subtitleTracks`. Returns -1 if no track is visible. Set to -1 to disable all subtitle tracks.
 
 ### `hls.subtitleDisplay`
 
@@ -1761,6 +1884,8 @@ Full list of Events is available below:
   - data: { levels : [available quality levels], audioTracks : [available audio tracks], captions? [available closed-captions media], subtitles?: [available subtitle tracks], url : manifestURL, stats : [LoaderStats], sessionData: [parsed #EXT-X-SESSION-DATA], networkDetails: [Loader specific object for debugging (XMLHttpRequest or fetch Response)]}
 - `Hls.Events.MANIFEST_PARSED` - fired after manifest has been parsed
   - data: { levels : [ available quality levels ], firstLevel : index of first quality level appearing in Manifest, audioTracks, subtitleTracks, stats, audio: boolean, video: boolean, altAudio: boolean }
+- `Hls.Events.STEERING_MANIFEST_LOADED` - fired when the Content Steering Manifest is loaded
+  - data: { `url`: steering manifest URL, `steeringManifest`: SteeringManifest object } }
 - `Hls.Events.LEVEL_SWITCHING` - fired when a level switch is requested
   - data: { `level` and Level object properties (please see [below](#level) for more information) }
 - `Hls.Events.LEVEL_SWITCHED` - fired when a level switch is effective
@@ -2008,12 +2133,35 @@ See sample `Level` object below:
 
 ```js
 {
-  url: [ 'http://levelURL.com', 'http://levelURLfailover.com' ],
-  bitrate: 246440,
-  name: "240",
-  codecs: "mp4a.40.5,avc1.42000d",
-  width: 320,
-  height: 136,
+  audioCodec: "mp4a.40.2"
+  audioGroupIds: <string[]> | undefined,
+  bitrate: 3000000,
+  codecSet: "avc1,mp4a",
+  details: <LevelDetails> | undefined
+  fragmentError: 0,
+  frameRate: 30,
+  height: 720,
+  loadError: 0
+  name: "720p",
+  realBitrate: 0,
+  supportedPromise: undefined,
+  supportedResult: {supported: true, configurations: <MediaDecodingConfiguration[]>, decodingInfoResults: <MediaCapabilitiesDecodingInfo[]>}
+  textGroupIds: <string[]> | undefined,
+  unknownCodecs: [],
+  url: [ "http://levelURL.com", "http://levelURLfailover.com" ],
+  videoCodec: "avc1.66.30",
+  width: 1280,
+  attrs: <AttrList>,
+  audioGroupId: undefined,
+  averageBitrate: 2962000,
+  codecs: "avc1.66.30,mp4a.40.2",
+  maxBitrate: 3000000,
+  pathwayId: ".",
+  score: 0,
+  textGroupId: "subs",
+  uri: "http://levelURL.com",
+  urlId: 0,
+  videoRange: "SDR"
 }
 ```
 
@@ -2063,6 +2211,7 @@ See sample object below:
 {
   duration: 10,
   level: 3,
+  cc: 0
   sn: 35,
   start: 30,
   url: 'http://fragURL.com'

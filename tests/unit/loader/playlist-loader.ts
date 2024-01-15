@@ -14,7 +14,7 @@ describe('PlaylistLoader', function () {
   it('parses empty manifest returns empty array', function () {
     const result = M3U8Parser.parseMasterPlaylist(
       '',
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels).to.deep.equal([]);
     expect(result.sessionData).to.equal(null);
@@ -25,7 +25,7 @@ describe('PlaylistLoader', function () {
 http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core`;
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels).to.deep.equal([]);
     expect(result.sessionData).to.equal(null);
@@ -38,7 +38,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels).to.have.lengthOf(1);
     expect(result.levels[0].bitrate).to.equal(836280);
@@ -48,7 +48,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
     expect(result.levels[0].height).to.equal(360);
     expect(result.levels[0].name).to.equal('480');
     expect(result.levels[0].url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core',
     );
     expect(result.sessionData).to.equal(null);
   });
@@ -61,11 +61,11 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels).to.have.lengthOf(1);
     expect(result.levels[0].url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core',
     );
   });
 
@@ -76,7 +76,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels.length).to.equal(1);
     expect(result.levels[0].bitrate).to.equal(836280);
@@ -86,7 +86,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
     expect(result.levels[0].height).to.equal(360);
     expect(result.levels[0].name).to.equal('480');
     expect(result.levels[0].url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core',
     );
     expect(result.sessionData).to.equal(null);
   });
@@ -98,7 +98,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     let result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels.length).to.equal(1);
     expect(result.levels[0].bitrate).to.equal(836280);
@@ -109,7 +109,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
     expect(result.levels[0].name).to.equal('480');
     expect(
       result.levels[0].url,
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core',
     );
     expect(result.sessionData).to.equal(null);
 
@@ -119,7 +119,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels.length).to.equal(1);
     expect(result.levels[0].bitrate).to.equal(836280);
@@ -129,7 +129,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
     expect(result.levels[0].height).to.equal(360);
     expect(result.levels[0].name).to.equal('480');
     expect(result.levels[0].url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core',
     );
     expect(result.sessionData).to.equal(null);
 
@@ -139,7 +139,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels).to.have.lengthOf(1);
     expect(result.levels[0].bitrate).to.equal(836280);
@@ -149,7 +149,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
     expect(result.levels[0].height).to.equal(360);
     expect(result.levels[0].name).to.equal('480');
     expect(result.levels[0].url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core',
     );
     expect(result.sessionData).to.equal(null);
   });
@@ -179,7 +179,7 @@ http://proxy-21.dailymotion.com/sec(2a991e17f08fcd94f95637a6dd718ddd)/video/107/
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     expect(result.levels.length).to.equal(10);
     expect(result.levels[0].bitrate).to.equal(836280);
@@ -203,7 +203,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     const expected = {
       'com.dailymotion.sessiondata.test': new AttrList({
@@ -241,7 +241,7 @@ http://proxy-21.dailymotion.com/sec(2a991e17f08fcd94f95637a6dd718ddd)/video/107/
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     const expected = {
       'com.dailymotion.sessiondata.test': new AttrList({
@@ -263,7 +263,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
 
     const { sessionData } = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'http://www.dailymotion.com'
+      'http://www.dailymotion.com',
     );
     const expected = {
       'com.dailymotion.sessiondata.test': new AttrList({
@@ -291,7 +291,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(0);
     expect(result.totalduration).to.equal(0);
@@ -309,7 +309,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(0);
     expect(result.totalduration).to.equal(0);
@@ -326,7 +326,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.targetduration).to.equal(2);
   });
@@ -342,7 +342,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.targetduration).to.equal(1);
   });
@@ -370,7 +370,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.variableList).to.equal(null);
     expect(result.totalduration).to.equal(51.24);
@@ -391,7 +391,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
     expect(result.fragments[4].start).to.equal(47.36);
     expect(result.fragments[4].duration).to.equal(3.88);
     expect(result.fragments[4].url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/frag(5)/video/107/282/158282701_mp4_h264_aac_hq.ts'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/frag(5)/video/107/282/158282701_mp4_h264_aac_hq.ts',
     );
   });
 
@@ -410,7 +410,7 @@ http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.totalduration).to.equal(4);
     expect(result.startSN).to.equal(0);
@@ -451,7 +451,7 @@ chop/segment-5.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.totalduration).to.equal(30);
     expect(result.startSN).to.equal(0);
@@ -468,7 +468,7 @@ chop/segment-5.ts
     expect(result.fragments[4].start).to.equal(24);
     expect(result.fragments[4].duration).to.equal(6);
     expect(result.fragments[4].url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/frag(5)/video/107/282/chop/segment-5.ts'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/frag(5)/video/107/282/chop/segment-5.ts',
     );
   });
 
@@ -495,7 +495,7 @@ chop/segment-5.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.totalduration).to.equal(51.24);
     expect(result.startSN).to.equal(0);
@@ -525,7 +525,7 @@ oceans_aes-audio=65000-video=236000-3.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.totalduration).to.equal(25);
     expect(result.startSN).to.equal(1);
@@ -537,11 +537,11 @@ oceans_aes-audio=65000-video=236000-3.ts
     expect(result.fragments[0].title).to.equal('no desc');
     expect(result.fragments[0].level).to.equal(0);
     expect(result.fragments[0].url).to.equal(
-      'http://foo.com/adaptive/oceans_aes/oceans_aes-audio=65000-video=236000-1.ts'
+      'http://foo.com/adaptive/oceans_aes/oceans_aes-audio=65000-video=236000-1.ts',
     );
     expectWithJSONMessage(
       result.fragments[0].levelkeys?.['com.apple.streamingkeydelivery'],
-      'levelkeys'
+      'levelkeys',
     ).to.deep.include({
       uri: 'skd://assetid?keyId=1234',
       method: 'AES-128',
@@ -574,7 +574,7 @@ oceans_aes-audio=65000-video=236000-3.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.totalduration).to.equal(25);
     expect(result.startSN).to.equal(1);
@@ -586,10 +586,10 @@ oceans_aes-audio=65000-video=236000-3.ts
     expect(result.fragments[0].title).to.equal('no desc');
     expect(result.fragments[0].level).to.equal(0);
     expect(result.fragments[0].url).to.equal(
-      'http://foo.com/adaptive/oceans_aes/oceans_aes-audio=65000-video=236000-1.ts'
+      'http://foo.com/adaptive/oceans_aes/oceans_aes-audio=65000-video=236000-1.ts',
     );
     expect(result.fragments[0].decryptdata?.uri).to.equal(
-      'http://foo.com/adaptive/oceans_aes/oceans.key'
+      'http://foo.com/adaptive/oceans_aes/oceans.key',
     );
     expect(result.fragments[0].decryptdata?.method).to.equal('AES-128');
     let sn = 1;
@@ -599,7 +599,7 @@ oceans_aes-audio=65000-video=236000-3.ts
     }
 
     expect(result.fragments[0].decryptdata?.iv?.buffer).to.deep.equal(
-      uint8View.buffer
+      uint8View.buffer,
     );
 
     sn = 3;
@@ -609,7 +609,7 @@ oceans_aes-audio=65000-video=236000-3.ts
     }
 
     expect(result.fragments[2].decryptdata?.iv?.buffer).to.deep.equal(
-      uint8View.buffer
+      uint8View.buffer,
     );
   });
 
@@ -656,7 +656,7 @@ lo008ts`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments.length).to.equal(10);
     expect(result.fragments[0].url).to.equal('http://dummy.com/lo007ts');
@@ -712,7 +712,7 @@ lo008ts`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(10);
     expect(result.fragments[0].url).to.equal('http://dummy.com/lo007ts');
@@ -723,6 +723,52 @@ lo008ts`;
     expect(result.fragments[9].url).to.equal('http://dummy.com/lo008ts');
     expect(result.fragments[9].byteRangeStartOffset).to.equal(684508);
     expect(result.fragments[9].byteRangeEndOffset).to.equal(817988);
+  });
+
+  it('parse level with #EXT-X-BYTERANGE before #EXT-X-MAP tag', function () {
+    const level = `#EXTM3U
+#EXT-X-ALLOW-CACHE:YES
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:4
+#EXT-X-MEDIA-SEQUENCE:1
+#EXT-X-BYTERANGE:10000@24000
+#EXT-X-MAP:URI="initsegment.m4v",BYTERANGE="24000@0"
+#EXTINF:4.000,
+lo007.m4v
+#EXT-X-BYTERANGE:30000@34000
+#EXTINF:4.000,
+lo007.m4v
+#EXT-X-BYTERANGE:40000@64000
+#EXTINF:4.000,
+lo007.m4v
+#EXT-X-ENDLIST`;
+
+    const result = M3U8Parser.parseLevelPlaylist(
+      level,
+      'http://dummy.com/playlist.m3u8',
+      0,
+      PlaylistLevelType.MAIN,
+      0,
+      null,
+    );
+    expect(result.fragments.length).to.equal(3);
+    expect(result.fragments[0].initSegment?.url).to.equal(
+      'http://dummy.com/initsegment.m4v',
+    );
+    expect(result.fragments[0].initSegment?.byteRangeStartOffset).to.equal(0);
+    expect(result.fragments[0].initSegment?.byteRangeEndOffset).to.equal(
+      24000,
+      'init end',
+    );
+    expect(result.fragments[0].url).to.equal('http://dummy.com/lo007.m4v');
+    expect(result.fragments[0].byteRangeStartOffset).to.equal(24000, '1 start');
+    expect(result.fragments[0].byteRangeEndOffset).to.equal(34000, '1 end');
+    expect(result.fragments[1].url).to.equal('http://dummy.com/lo007.m4v');
+    expect(result.fragments[1].byteRangeStartOffset).to.equal(34000, '2 start');
+    expect(result.fragments[1].byteRangeEndOffset).to.equal(64000, '2 end');
+    expect(result.fragments[2].url).to.equal('http://dummy.com/lo007.m4v');
+    expect(result.fragments[2].byteRangeStartOffset).to.equal(64000, '3 start');
+    expect(result.fragments[2].byteRangeEndOffset).to.equal(104000, '3 end');
   });
 
   it('parse level with #EXT-X-BYTERANGE without offset', function () {
@@ -747,7 +793,7 @@ lo007ts`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments.length).to.equal(3);
     expect(result.fragments[0].url).to.equal('http://dummy.com/lo007ts');
@@ -784,7 +830,7 @@ lo007ts`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(5);
     expect(result.totalduration).to.equal(45);
@@ -818,7 +864,7 @@ lo007ts`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(5);
     expect(result.totalduration).to.equal(45);
@@ -842,7 +888,7 @@ lo007ts`;
         startTimeOffset: null,
         variableList: null,
         hasVariableRefs: false,
-      }
+      },
     );
     expect(result.length).to.equal(1);
     expect(result[0].autoselect).to.be.true;
@@ -852,7 +898,7 @@ lo007ts`;
     expect(result[0].lang).to.equal('eng');
     expect(result[0].name).to.equal('Audio');
     expect(result[0].url).to.equal(
-      'https://hls.ted.com/videos/ZakEbrahim_2014/audio/600k.m3u8?qr=true&preroll=Blank'
+      'https://hls.ted.com/videos/ZakEbrahim_2014/audio/600k.m3u8?qr=true&preroll=Blank',
     );
   });
   // issue #425 - first fragment has null url and no decryptdata if EXT-X-KEY follows EXTINF
@@ -885,7 +931,7 @@ lo007ts`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(8);
     expect(result.totalduration).to.equal(80);
@@ -950,25 +996,25 @@ http://dummy.url.com/hls/live/segment/segment_022916_164500865_719935.ts`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(10);
     expect(result.totalduration).to.equal(84.94);
     expect(result.targetduration).to.equal(10);
     expect(result.fragments[0].url).to.equal(
-      'http://dummy.url.com/hls/live/segment/segment_022916_164500865_719926.ts'
+      'http://dummy.url.com/hls/live/segment/segment_022916_164500865_719926.ts',
     );
     expect(result.fragments[0].tagList).to.have.lengthOf(1);
     expect(result.fragments[2].tagList[0][0]).to.equal('EXT-X-CUE-OUT');
     expect(result.fragments[2].tagList[0][1]).to.equal(
-      'DURATION=150,BREAKID=0x0'
+      'DURATION=150,BREAKID=0x0',
     );
     expect(result.fragments[3].tagList[0][1]).to.equal('0.50');
     expect(result.fragments[4].tagList).to.have.lengthOf(2);
     expect(result.fragments[4].tagList[0][0]).to.equal('EXT-X-CUE-IN');
     expect(result.fragments[7].tagList[0][0]).to.equal('INF');
     expect(result.fragments[8].url).to.equal(
-      'http://dummy.url.com/hls/live/segment/segment_022916_164500865_719934.ts'
+      'http://dummy.url.com/hls/live/segment/segment_022916_164500865_719934.ts',
     );
   });
 
@@ -993,21 +1039,21 @@ Rollover38803/20160525T064049-01-69844069.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(3);
     expect(result.hasProgramDateTime).to.be.true;
     expect(result.totalduration).to.equal(30);
     expect(result.fragments[0].url).to.equal(
-      'http://video.example.com/Rollover38803/20160525T064049-01-69844067.ts'
+      'http://video.example.com/Rollover38803/20160525T064049-01-69844067.ts',
     );
     expect(result.fragments[0].programDateTime).to.equal(1464366884000);
     expect(result.fragments[1].url).to.equal(
-      'http://video.example.com/Rollover38803/20160525T064049-01-69844068.ts'
+      'http://video.example.com/Rollover38803/20160525T064049-01-69844068.ts',
     );
     expect(result.fragments[1].programDateTime).to.equal(1464366894000);
     expect(result.fragments[2].url).to.equal(
-      'http://video.example.com/Rollover38803/20160525T064049-01-69844069.ts'
+      'http://video.example.com/Rollover38803/20160525T064049-01-69844069.ts',
     );
     expect(result.fragments[2].programDateTime).to.equal(1464366904000);
   });
@@ -1026,7 +1072,7 @@ Rollover38803/20160525T064049-01-69844069.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments).to.have.lengthOf(1);
     expect(result.fragments[0].duration).to.equal(0.36);
@@ -1049,11 +1095,11 @@ main.mp4`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     const initSegment = result.fragments[0].initSegment;
     expect(initSegment?.url).to.equal(
-      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/main.mp4'
+      'http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/main.mp4',
     );
     expect(initSegment?.byteRangeStartOffset).to.equal(0);
     expect(initSegment?.byteRangeEndOffset).to.equal(718);
@@ -1081,14 +1127,14 @@ frag2.mp4
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments[0].initSegment?.url).to.equal(
-      'http://video.example.com/main.mp4'
+      'http://video.example.com/main.mp4',
     );
     expect(result.fragments[0].initSegment?.sn).to.equal('initSegment');
     expect(result.fragments[1].initSegment?.url).to.equal(
-      'http://video.example.com/alt.mp4'
+      'http://video.example.com/alt.mp4',
     );
     expect(result.fragments[1].initSegment?.sn).to.equal('initSegment');
   });
@@ -1115,19 +1161,19 @@ Rollover38803/20160525T064049-01-69844069.ts
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(result.hasProgramDateTime).to.be.true;
       expect(result.fragments[0].rawProgramDateTime).to.equal(
-        '2016-05-27T16:34:44Z'
+        '2016-05-27T16:34:44Z',
       );
       expect(result.fragments[0].programDateTime).to.equal(1464366884000);
       expect(result.fragments[1].rawProgramDateTime).to.equal(
-        '2016-05-27T16:34:54Z'
+        '2016-05-27T16:34:54Z',
       );
       expect(result.fragments[1].programDateTime).to.equal(1464366894000);
       expect(result.fragments[2].rawProgramDateTime).to.equal(
-        '2016-05-27T16:35:04Z'
+        '2016-05-27T16:35:04Z',
       );
       expect(result.fragments[2].programDateTime).to.equal(1464366904000);
     });
@@ -1149,11 +1195,11 @@ frag2.ts
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(result.hasProgramDateTime).to.be.true;
       expect(result.fragments[2].rawProgramDateTime).to.equal(
-        '2016-05-27T16:35:04Z'
+        '2016-05-27T16:35:04Z',
       );
       expect(result.fragments[1].programDateTime).to.equal(1464366894000);
       expect(result.fragments[0].programDateTime).to.equal(1464366884000);
@@ -1176,11 +1222,11 @@ frag2.ts
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(result.hasProgramDateTime).to.be.true;
       expect(result.fragments[0].rawProgramDateTime).to.equal(
-        '2016-05-27T16:35:04Z'
+        '2016-05-27T16:35:04Z',
       );
       expect(result.fragments[1].programDateTime).to.equal(1464366914000);
       expect(result.fragments[2].programDateTime).to.equal(1464366924000);
@@ -1215,22 +1261,22 @@ frag5.ts
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(result.hasProgramDateTime).to.be.true;
       expect(result.fragments[0].programDateTime).to.equal(1464366904000);
       expect(result.fragments[0].rawProgramDateTime).to.equal(
-        '2016-05-27T16:35:04Z'
+        '2016-05-27T16:35:04Z',
       );
       expect(result.fragments[1].programDateTime).to.equal(1464366914000);
       expect(result.fragments[2].programDateTime).to.equal(1495902904000);
       expect(result.fragments[2].rawProgramDateTime).to.equal(
-        '2017-05-27T16:35:04Z'
+        '2017-05-27T16:35:04Z',
       );
       expect(result.fragments[3].programDateTime).to.equal(1495902914000);
       expect(result.fragments[4].programDateTime).to.equal(1432726923000);
       expect(result.fragments[4].rawProgramDateTime).to.equal(
-        '2015-05-27T11:42:03Z'
+        '2015-05-27T11:42:03Z',
       );
       expect(result.fragments[5].programDateTime).to.equal(1432726933000);
     });
@@ -1250,11 +1296,11 @@ frag1.ts
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(result.hasProgramDateTime).to.be.true;
       expect(result.fragments[0].rawProgramDateTime).to.equal(
-        '2016-05-27T16:35:04Z'
+        '2016-05-27T16:35:04Z',
       );
       expect(result.fragments[0].programDateTime).to.equal(1464366904000);
     });
@@ -1273,7 +1319,7 @@ frag1.ts
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(result.hasProgramDateTime).to.be.false;
       expect(result.fragments[0].rawProgramDateTime).to.not.exist;
@@ -1325,7 +1371,7 @@ fileSequence1151233.ts
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(details.canBlockReload).to.be.true;
       expect(details.canSkipUntil).to.equal(24);
@@ -1347,7 +1393,7 @@ fileSequence1151226.ts`,
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(details.canSkipUntil).to.equal(20);
       expect(details.holdBack).to.equal(15.1);
@@ -1365,7 +1411,7 @@ fileSequence1151226.ts`,
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(details.partTarget).to.equal(1.004);
     });
@@ -1377,7 +1423,7 @@ fileSequence1151226.ts`,
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       // TODO: Partial Segments for a yet to be appended EXT-INF entry will be added to the fragments list
       //  once PartLoader is implemented to abstract away part loading complexity using progressive loader events
@@ -1457,7 +1503,7 @@ fileSequence1151226.ts`,
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(details.preloadHint).to.be.an('object');
       expect(details.preloadHint).to.deep.include({
@@ -1473,7 +1519,7 @@ fileSequence1151226.ts`,
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       const renditionReports = details.renditionReports as AttrList[];
       expect(renditionReports).to.be.an('array').which.has.lengthOf(2);
@@ -1525,7 +1571,7 @@ fileSequence81641.m4s
         0,
         PlaylistLevelType.MAIN,
         0,
-        null
+        null,
       );
       expect(details.skippedSegments).to.equal(9);
       expect(details.recentlyRemovedDateranges).to.deep.equal(['DrTag', 'tdl']);
@@ -1565,7 +1611,7 @@ fileSequence2.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     const fragments = details.fragments as Fragment[];
     expectWithJSONMessage(fragments[0].tagList).to.deep.equal([
@@ -1602,7 +1648,7 @@ fileSequence2.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     const fragments = details.fragments as Fragment[];
     expectWithJSONMessage(fragments[0].tagList).to.deep.equal([
@@ -1644,7 +1690,7 @@ main4.aac
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expectWithJSONMessage(details.fragments[0].tagList).to.deep.equal([
       ['PROGRAM-DATE-TIME', '2018-09-28T16:50:26Z'],
@@ -1692,7 +1738,7 @@ http://dummy.url.com/hls/live/segment/segment_022916_164500865_719928.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments[2].tagList[0][0]).to.equal('EXT-X-CUSTOM-DATE');
     expect(result.fragments[2].tagList[0][1]).to.equal('2016-05-27T16:34:44Z');
@@ -1700,7 +1746,7 @@ http://dummy.url.com/hls/live/segment/segment_022916_164500865_719928.ts
     expect(result.fragments[2].tagList[1][1]).to.equal('{"key":"value"}');
     expect(result.fragments[2].tagList[2][0]).to.equal('EXT-X-CUSTOM-URI');
     expect(result.fragments[2].tagList[2][1]).to.equal(
-      'http://dummy.url.com/hls/moreinfo.json'
+      'http://dummy.url.com/hls/moreinfo.json',
     );
   });
 
@@ -1722,16 +1768,16 @@ http://dummy.url.com/hls/live/segment/segment_022916_164500865_719928.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments.length).to.equal(2);
     expect(result.totalduration).to.equal(12.012);
     expect(result.targetduration).to.equal(7);
     expect(result.fragments[0].url).to.equal(
-      'http://dummy.url.com/180724_Allison VLOG-v3_00001.ts'
+      'http://dummy.url.com/180724_Allison VLOG-v3_00001.ts',
     );
     expect(result.fragments[1].url).to.equal(
-      'http://dummy.url.com/180724_Allison VLOG-v3_00002.ts'
+      'http://dummy.url.com/180724_Allison VLOG-v3_00002.ts',
     );
   });
 
@@ -1754,16 +1800,16 @@ http://dummy.url.com/hls/live/segment/segment_022916_164500865_719928.ts
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments.length).to.equal(2);
     expect(result.totalduration).to.equal(12.012);
     expect(result.targetduration).to.equal(7);
     expect(result.fragments[0].url).to.equal(
-      'http://dummy.url.com/180724_Allison VLOG v3_00001.ts'
+      'http://dummy.url.com/180724_Allison VLOG v3_00001.ts',
     );
     expect(result.fragments[1].url).to.equal(
-      'http://dummy.url.com/180724_Allison VLOG v3_00002.ts'
+      'http://dummy.url.com/180724_Allison VLOG v3_00002.ts',
     );
   });
 
@@ -1834,7 +1880,7 @@ media_1638278.m4s`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments.length).to.equal(22);
     let pdt = 1636514824000;
@@ -1888,15 +1934,15 @@ media_1638278.m4s`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(result.fragments.length).to.equal(8);
     expect(result.fragments[0].levelkeys, 'first segment has no keys').to.equal(
-      undefined
+      undefined,
     );
     expect(
       result.fragments[1].levelkeys,
-      'second segment has no keys'
+      'second segment has no keys',
     ).to.equal(undefined);
     expect(result.fragments[2].levelkeys, 'third segment has two keys')
       .to.be.an('object')
@@ -1911,10 +1957,10 @@ media_1638278.m4s`;
         'urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed',
       ]);
     expect(result.fragments[4].levelkeys, 'fifth segment has no keys').to.equal(
-      undefined
+      undefined,
     );
     expect(result.fragments[5].levelkeys, 'sixth segment has no keys').to.equal(
-      undefined
+      undefined,
     );
     expect(result.fragments[6].levelkeys, 'seventh segment has two keys')
       .to.be.an('object')
@@ -2062,7 +2108,7 @@ describe('#EXT-X-DEFINE', function () {
       .with.property('message')
       .which.equals(
         'EXT-X-DEFINE duplicate Variable Name declarations: "foo"',
-        result.playlistParsingError?.message
+        result.playlistParsingError?.message,
       );
   });
 
@@ -2094,7 +2140,7 @@ describe('#EXT-X-DEFINE', function () {
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'https://www.x.com'
+      'https://www.x.com',
     );
 
     if (result.variableList === null) {
@@ -2114,11 +2160,11 @@ describe('#EXT-X-DEFINE', function () {
       return;
     }
     expect(result.sessionKeys[0].keyFormat).to.equal(
-      'com.apple.streamingkeydelivery'
+      'com.apple.streamingkeydelivery',
     );
     expect(result.sessionKeys[0].keyFormatVersions).to.deep.equal([1, 2]);
     expect(result.sessionKeys[0].iv).to.deep.equal(
-      new Uint8Array([0, 0, 0, 2])
+      new Uint8Array([0, 0, 0, 2]),
     );
 
     expect(result.contentSteering).to.deep.include({
@@ -2132,7 +2178,7 @@ describe('#EXT-X-DEFINE', function () {
         url: 'https://example.com/sec/video/1.m3u8',
         videoCodec: 'avc1.64001f',
       },
-      JSON.stringify(result.levels[0], null, 2)
+      JSON.stringify(result.levels[0], null, 2),
     );
 
     expect(result.levels[1]).to.deep.include(
@@ -2141,13 +2187,13 @@ describe('#EXT-X-DEFINE', function () {
         url: 'https://example.com/sec/avc1.64001f/2.m3u8',
         videoCodec: 'avc1.64001f',
       },
-      JSON.stringify(result.levels[0], null, 2)
+      JSON.stringify(result.levels[0], null, 2),
     );
 
     const { AUDIO: audioTracks = [] } = M3U8Parser.parseMasterPlaylistMedia(
       manifest,
       'https://www.x.com',
-      result
+      result,
     );
 
     expect(audioTracks[0]).to.deep.include(
@@ -2156,7 +2202,7 @@ describe('#EXT-X-DEFINE', function () {
         lang: 'eng',
         url: 'https://example.com/200k.m3u8',
       },
-      JSON.stringify(audioTracks[0], null, 2)
+      JSON.stringify(audioTracks[0], null, 2),
     );
   });
 
@@ -2202,7 +2248,7 @@ a{$mvpVariable}.mp4
       0,
       PlaylistLevelType.MAIN,
       0,
-      { mvpVariable: 'ok' }
+      { mvpVariable: 'ok' },
     );
     if (details.variableList === null) {
       expect(details.variableList, 'variableList').to.not.equal(null);
@@ -2224,7 +2270,7 @@ a{$mvpVariable}.mp4
     expect(details.fragments).to.have.lengthOf(7);
     expect(details.fragments[3].title).to.equal(
       'no desc {$mvpVariable}',
-      'does not substitute vars in segment "title"'
+      'does not substitute vars in segment "title"',
     );
     expect(details.fragments[3]).to.deep.include({
       relurl: 'aok.mp4',
@@ -2256,7 +2302,7 @@ a{$mvpVariable}.mp4
       });
     expectWithJSONMessage(
       details.fragments[3].levelkeys?.['com.apple.streamingkeydelivery'],
-      'levelkeys'
+      'levelkeys',
     ).to.deep.include({
       uri: 'skd://key-data',
       method: 'SAMPLE-AES',
@@ -2300,7 +2346,7 @@ https://www.x.com/sec/video/2.m3u8?parent-token={$token}`;
 
     const result = M3U8Parser.parseMasterPlaylist(
       manifest,
-      'https://www.x.com?foo=bar&a=ok&token=1234'
+      'https://www.x.com?foo=bar&a=ok&token=1234',
     );
 
     if (result.variableList === null) {
@@ -2320,13 +2366,13 @@ https://www.x.com/sec/video/2.m3u8?parent-token={$token}`;
       {
         url: 'https://www.x.com/sec/video/1.m3u8?parent-token=1234',
       },
-      JSON.stringify(result.levels[0], null, 2)
+      JSON.stringify(result.levels[0], null, 2),
     );
     expect(result.levels[1]).to.deep.include(
       {
         url: 'https://www.x.com/sec/video/2.m3u8?parent-token=1234',
       },
-      JSON.stringify(result.levels[0], null, 2)
+      JSON.stringify(result.levels[0], null, 2),
     );
     const level = `#EXTM3U
 #EXT-X-VERSION:1
@@ -2347,7 +2393,7 @@ segment-3.mp4?t={$token}`;
       0,
       PlaylistLevelType.MAIN,
       0,
-      result.variableList
+      result.variableList,
     );
     if (details.variableList === null) {
       expect(details.variableList, 'variableList').to.not.equal(null);
@@ -2389,7 +2435,7 @@ a{$mvpVar}.mp4
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(details.variableList).to.equal(null);
     expect(details)
@@ -2398,7 +2444,7 @@ a{$mvpVar}.mp4
       .which.has.property('message')
       .which.equals(
         'EXT-X-DEFINE IMPORT attribute not found in Multivariant Playlist: "mvpVar"',
-        details.playlistParsingError?.message
+        details.playlistParsingError?.message,
       );
     expect(details.fragments[0].relurl).to.equal('a{$mvpVar}.mp4');
   });
@@ -2420,7 +2466,7 @@ a{$bar}.mp4
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(details.variableList, 'variableList').to.equal(null);
     expect(details)
@@ -2429,7 +2475,7 @@ a{$bar}.mp4
       .which.has.property('message')
       .which.equals(
         'Missing preceding EXT-X-DEFINE tag for Variable Reference: "bar"',
-        details.playlistParsingError?.message
+        details.playlistParsingError?.message,
       );
     expect(details.fragments?.[0].relurl).to.equal('a{$bar}.mp4');
   });
@@ -2452,7 +2498,7 @@ a{$bar}.mp4
       0,
       PlaylistLevelType.MAIN,
       0,
-      null
+      null,
     );
     expect(details.variableList, 'variableList').to.deep.equal({ bar: '1' });
     expect(details)
@@ -2461,7 +2507,7 @@ a{$bar}.mp4
       .which.has.property('message')
       .which.equals(
         'Missing preceding EXT-X-DEFINE tag for Variable Reference: "bar"',
-        details.playlistParsingError?.message
+        details.playlistParsingError?.message,
       );
     expect(details.fragments[0].relurl).to.equal('a{$bar}.mp4');
   });

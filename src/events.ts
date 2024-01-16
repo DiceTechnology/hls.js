@@ -380,7 +380,11 @@ export interface HlsListeners {
   ) => void;
   [Events.VIDEO_PTS_NEEDED]: (
     event: Events.VIDEO_PTS_NEEDED,
-    data: VideoPTSNeededCC
+    data: VideoPTSNeededCC,
+  ) => void;
+  [Events.VIDEO_PTS_NEEDED]: (
+    event: Events.VIDEO_PTS_NEEDED,
+    data: VideoPTSNeededCC,
   ) => void;
 }
 export interface HlsEventEmitter {

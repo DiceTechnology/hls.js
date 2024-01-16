@@ -514,15 +514,18 @@ describe('discontinuities', function () {
     const curDetails = {
       fragments: mockFrags,
     };
-    const actual = findDiscontinuousReferenceFrag2(prevDetails, curDetails);
-    expect(actual.start).to.equal(24);
+    const actual = findDiscontinuousReferenceFrag2(
+      prevDetails as any,
+      curDetails as any,
+    );
+    expect(actual?.start).to.equal(24);
   });
 
   it('returns undefined if there are no frags in the previous level', function () {
     const expected = undefined;
     const actual = findDiscontinuousReferenceFrag2(
-      { fragments: [] },
-      { fragments: mockFrags }
+      { fragments: [] } as any,
+      { fragments: mockFrags } as any,
     );
     expect(actual).to.equal(expected);
   });
@@ -530,8 +533,8 @@ describe('discontinuities', function () {
   it('returns undefined if there are no matching frags in the previous level', function () {
     const expected = undefined;
     const actual = findDiscontinuousReferenceFrag2(
-      { fragments: [{ cc: 10 }] },
-      { fragments: mockFrags }
+      { fragments: [{ cc: 10 }] } as any,
+      { fragments: mockFrags } as any,
     );
     expect(actual).to.equal(expected);
   });
@@ -539,8 +542,8 @@ describe('discontinuities', function () {
   it('returns undefined if there are no frags in the current level', function () {
     const expected = undefined;
     const actual = findDiscontinuousReferenceFrag2(
-      { fragments: [{ cc: 0 }] },
-      { fragments: [] }
+      { fragments: [{ cc: 0 }] } as any,
+      { fragments: [] } as any,
     );
     expect(actual).to.equal(expected);
   });

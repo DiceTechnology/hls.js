@@ -34,6 +34,12 @@ const isPlayStation4 = () => {
 
 function getCueClass(): typeof VTTCue | typeof TextTrackCue | undefined {
   if (typeof self === 'undefined') return undefined;
+
+  // Attempt to recreate Safari functionality by creating
+  // WebKitDataCue objects when available and store the decoded
+  // ID3 data in the value property of the cue
+  // WebKitDataCue exists on PlayStation 4 WebMAF,
+  // but doesn't allow its value to be set.
   return ((!isPlayStation4() && self.WebKitDataCue) ||
     self.VTTCue ||
     self.TextTrackCue) as any;

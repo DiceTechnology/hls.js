@@ -25,7 +25,7 @@ type EMEControllerTestable = Omit<
   mediaKeySessions: MediaKeySessionContext[];
   onMediaAttached: (
     event: Events.MEDIA_ATTACHED,
-    data: MediaAttachedData
+    data: MediaAttachedData,
   ) => void;
   onMediaDetached: () => void;
 };
@@ -37,10 +37,38 @@ class MediaMock extends EventEmitter {
   constructor() {
     super();
     this.setMediaKeys = sinon.spy((mediaKeys: MediaKeys | null) =>
-      Promise.resolve()
+      Promise.resolve(),
     );
     this.addEventListener = this.addListener.bind(this);
     this.removeEventListener = this.removeListener.bind(this);
+  }
+}
+
+class MediaKeySessionMock extends EventEmitter {
+  addEventListener: any;
+  removeEventListener: any;
+  keyStatuses: Map<Uint8Array, string>;
+  constructor() {
+    super();
+    this.keyStatuses = new Map();
+    this.addEventListener = this.addListener.bind(this);
+    this.removeEventListener = this.removeListener.bind(this);
+  }
+  generateRequest() {
+    return Promise.resolve().then(() => {
+      this.emit('message', {
+        messageType: 'license-request',
+        message: new Uint8Array(0),
+      });
+      this.keyStatuses.set(new Uint8Array(0), 'usable');
+      this.emit('keystatuseschange', {});
+    });
+  }
+  remove() {
+    return Promise.resolve();
+  }
+  update() {
+    return Promise.resolve();
   }
 }
 
@@ -82,25 +110,8 @@ describe('EMEController', function () {
         createMediaKeys: sinon.spy(() =>
           Promise.resolve({
             setServerCertificate: () => Promise.resolve(),
-            createSession: (): Partial<MediaKeySession> => ({
-              addEventListener: () => {},
-              onmessage: null,
-              onkeystatuseschange: null,
-              generateRequest() {
-                return Promise.resolve().then(() => {
-                  this.onmessage({
-                    messageType: 'license-request',
-                    message: new Uint8Array(0),
-                  });
-                  this.keyStatuses.set(new Uint8Array(0), 'usable');
-                  this.onkeystatuseschange({});
-                });
-              },
-              remove: () => Promise.resolve(),
-              update: () => Promise.resolve(),
-              keyStatuses: new Map(),
-            }),
-          })
+            createSession: () => new MediaKeySessionMock(),
+          }),
         ),
       });
     });
@@ -116,7 +127,7 @@ describe('EMEController', function () {
     });
 
     sinonFakeXMLHttpRequestStatic.onCreate = (
-      xhr: sinon.SinonFakeXMLHttpRequest
+      xhr: sinon.SinonFakeXMLHttpRequest,
     ) => {
       self.setTimeout(() => {
         (xhr as any).response = new Uint8Array();
@@ -163,25 +174,8 @@ describe('EMEController', function () {
         createMediaKeys: sinon.spy(() =>
           Promise.resolve({
             setServerCertificate: () => Promise.resolve(),
-            createSession: (): Partial<MediaKeySession> => ({
-              addEventListener: () => {},
-              onmessage: null,
-              onkeystatuseschange: null,
-              generateRequest() {
-                return Promise.resolve().then(() => {
-                  this.onmessage({
-                    messageType: 'license-request',
-                    message: new Uint8Array(0),
-                  });
-                  this.keyStatuses.set(new Uint8Array(0), 'usable');
-                  this.onkeystatuseschange({});
-                });
-              },
-              remove: () => Promise.resolve(),
-              update: () => Promise.resolve(),
-              keyStatuses: new Map(),
-            }),
-          })
+            createSession: () => new MediaKeySessionMock(),
+          }),
         ),
       });
     });
@@ -201,7 +195,7 @@ describe('EMEController', function () {
     });
 
     sinonFakeXMLHttpRequestStatic.onCreate = (
-      xhr: sinon.SinonFakeXMLHttpRequest
+      xhr: sinon.SinonFakeXMLHttpRequest,
     ) => {
       self.setTimeout(() => {
         (xhr as any).response = new Uint8Array();
@@ -260,12 +254,13 @@ describe('EMEController', function () {
             setServerCertificate: () => Promise.resolve(),
             createSession: () => ({
               addEventListener: () => {},
+              removeEventListener: () => {},
               generateRequest: () => Promise.reject(new Error('bad data')),
               remove: () => Promise.resolve(),
               update: () => Promise.resolve(),
               keyStatuses: new Map(),
             }),
-          })
+          }),
         ),
       });
     });
@@ -309,7 +304,7 @@ describe('EMEController', function () {
       .finally(() => {
         expect(emeController.hls.trigger).callCount(1);
         expect(emeController.hls.trigger.args[0][1].details).to.equal(
-          ErrorDetails.KEY_SYSTEM_NO_SESSION
+          ErrorDetails.KEY_SYSTEM_NO_SESSION,
         );
       });
   });
@@ -324,25 +319,8 @@ describe('EMEController', function () {
         createMediaKeys: sinon.spy(() =>
           Promise.resolve({
             setServerCertificate: mediaKeysSetServerCertificateSpy,
-            createSession: () => ({
-              addEventListener: () => {},
-              onmessage: null,
-              onkeystatuseschange: null,
-              generateRequest() {
-                return Promise.resolve().then(() => {
-                  this.onmessage({
-                    messageType: 'license-request',
-                    message: new Uint8Array(0),
-                  });
-                  this.keyStatuses.set(new Uint8Array(0), 'usable');
-                  this.onkeystatuseschange({});
-                });
-              },
-              remove: () => Promise.resolve(),
-              update: () => Promise.resolve(),
-              keyStatuses: new Map(),
-            }),
-          })
+            createSession: () => new MediaKeySessionMock(),
+          }),
         ),
       });
     });
@@ -359,7 +337,7 @@ describe('EMEController', function () {
 
     let xhrInstance;
     sinonFakeXMLHttpRequestStatic.onCreate = (
-      xhr: sinon.SinonFakeXMLHttpRequest
+      xhr: sinon.SinonFakeXMLHttpRequest,
     ) => {
       xhrInstance = xhr;
       Promise.resolve().then(() => {
@@ -386,7 +364,9 @@ describe('EMEController', function () {
     } as any);
 
     expect(
-      emeController.keyIdToKeySessionPromise['00000000000000000000000000000000']
+      emeController.keyIdToKeySessionPromise[
+        '00000000000000000000000000000000'
+      ],
     ).to.be.a('Promise');
     if (
       !emeController.keyIdToKeySessionPromise[
@@ -400,14 +380,14 @@ describe('EMEController', function () {
     ].finally(() => {
       expect(mediaKeysSetServerCertificateSpy).to.have.been.calledOnce;
       expect(mediaKeysSetServerCertificateSpy).to.have.been.calledWith(
-        xhrInstance.response
+        xhrInstance.response,
       );
     });
   });
 
   it('should fetch the server certificate and trigger update failed error', function () {
     const mediaKeysSetServerCertificateSpy = sinon.spy(() =>
-      Promise.reject(new Error('Failed'))
+      Promise.reject(new Error('Failed')),
     );
 
     const reqMediaKsAccessSpy = sinon.spy(function () {
@@ -419,12 +399,13 @@ describe('EMEController', function () {
             setServerCertificate: mediaKeysSetServerCertificateSpy,
             createSession: () => ({
               addEventListener: () => {},
+              removeEventListener: () => {},
               generateRequest: () => Promise.resolve(),
               remove: () => Promise.resolve(),
               update: () => Promise.resolve(),
               keyStatuses: new Map(),
             }),
-          })
+          }),
         ),
       });
     });
@@ -441,7 +422,7 @@ describe('EMEController', function () {
 
     let xhrInstance;
     sinonFakeXMLHttpRequestStatic.onCreate = (
-      xhr: sinon.SinonFakeXMLHttpRequest
+      xhr: sinon.SinonFakeXMLHttpRequest,
     ) => {
       xhrInstance = xhr;
       self.setTimeout(() => {
@@ -466,7 +447,9 @@ describe('EMEController', function () {
     } as any);
 
     expect(
-      emeController.keyIdToKeySessionPromise['00000000000000000000000000000000']
+      emeController.keyIdToKeySessionPromise[
+        '00000000000000000000000000000000'
+      ],
     ).to.be.a('Promise');
     if (
       !emeController.keyIdToKeySessionPromise[
@@ -482,12 +465,12 @@ describe('EMEController', function () {
       .finally(() => {
         expect(mediaKeysSetServerCertificateSpy).to.have.been.calledOnce;
         expect((mediaKeysSetServerCertificateSpy.args[0] as any)[0]).to.equal(
-          xhrInstance.response
+          xhrInstance.response,
         );
 
         expect(emeController.hls.trigger).to.have.been.calledOnce;
         expect(emeController.hls.trigger.args[0][1].details).to.equal(
-          ErrorDetails.KEY_SYSTEM_SERVER_CERTIFICATE_UPDATE_FAILED
+          ErrorDetails.KEY_SYSTEM_SERVER_CERTIFICATE_UPDATE_FAILED,
         );
       });
   });
@@ -501,12 +484,13 @@ describe('EMEController', function () {
           Promise.resolve({
             createSession: () => ({
               addEventListener: () => {},
+              removeEventListener: () => {},
               generateRequest: () => Promise.resolve(),
               remove: () => Promise.resolve(),
               update: () => Promise.resolve(),
               keyStatuses: new Map(),
             }),
-          })
+          }),
         ),
       });
     });
@@ -522,7 +506,7 @@ describe('EMEController', function () {
     });
 
     sinonFakeXMLHttpRequestStatic.onCreate = (
-      xhr: sinon.SinonFakeXMLHttpRequest
+      xhr: sinon.SinonFakeXMLHttpRequest,
     ) => {
       self.setTimeout(() => {
         xhr.status = 400;
@@ -546,7 +530,9 @@ describe('EMEController', function () {
     } as any);
 
     expect(
-      emeController.keyIdToKeySessionPromise['00000000000000000000000000000000']
+      emeController.keyIdToKeySessionPromise[
+        '00000000000000000000000000000000'
+      ],
     ).to.be.a('Promise');
     if (
       !emeController.keyIdToKeySessionPromise[
@@ -562,7 +548,7 @@ describe('EMEController', function () {
       .finally(() => {
         expect(emeController.hls.trigger).to.have.been.calledOnce;
         expect(emeController.hls.trigger.args[0][1].details).to.equal(
-          ErrorDetails.KEY_SYSTEM_SERVER_CERTIFICATE_REQUEST_FAILED
+          ErrorDetails.KEY_SYSTEM_SERVER_CERTIFICATE_REQUEST_FAILED,
         );
       });
   });
@@ -577,12 +563,13 @@ describe('EMEController', function () {
             setServerCertificate: () => Promise.resolve(),
             createSession: () => ({
               addEventListener: () => {},
+              removeEventListener: () => {},
               generateRequest: () => Promise.resolve(),
               remove: () => Promise.resolve(),
               update: () => Promise.resolve(),
               keyStatuses: new Map(),
             }),
-          })
+          }),
         ),
       });
     });

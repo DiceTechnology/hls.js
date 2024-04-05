@@ -15,6 +15,9 @@ defaults:
 jobs:
   config:
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:config:${{ github.ref }}'
+      cancel-in-progress: true
     outputs:
       canUseSauce: ${{ steps.check_sauce_access.outputs.result == 'true' }}
       tag: ${{ steps.extract_tag.outputs.result }}
@@ -24,7 +27,7 @@ jobs:
         id: check_sauce_access
         run: |
           if ! [[ -z "$SAUCE_USERNAME" ]] && ! [[ -z "$SAUCE_ACCESS_KEY" ]]; then
-            echo "::set-output name=result::true"
+            echo "result=true" >> $GITHUB_OUTPUT
           fi
         env:
           CI: true
@@ -32,7 +35,7 @@ jobs:
           SAUCE_ACCESS_KEY: ${{ secrets.SAUCE_ACCESS_KEY }}
       - name: extract tag
         id: extract_tag
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const prefix = 'refs/tags/';
@@ -43,15 +46,16 @@ jobs:
   build:
     needs: config
     runs-on: ubuntu-latest
-
+    concurrency:
+      group: 'build:build:${{ github.ref }}'
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: check package-lock.json version
-        id: extract_tag
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
@@ -65,7 +69,7 @@ jobs:
             }
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -77,13 +81,13 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
 
       - name: install
         run: |
-          npx -y npm-ci-please@^1.1.1
+          npm ci
         env:
           CI: true
 
@@ -112,7 +116,7 @@ jobs:
           CI: true
 
       - name: upload build
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build
           # version number is set in package.json so need to include that
@@ -125,11 +129,14 @@ jobs:
   test_unit:
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:test_unit:${{ github.ref }}'
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -141,18 +148,18 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
       - name: install
         run: |
-          npx -y npm-ci-please@^1.1.1
+          npm ci
         env:
           CI: true
 
@@ -166,11 +173,14 @@ jobs:
     needs: [config, test_unit]
     if: needs.config.outputs.tag || needs.config.outputs.isMainBranch == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:cloudflare_pages:${{ github.ref }}'
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -182,18 +192,18 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
       - name: install
         run: |
-          npx -y npm-ci-please@^1.1.1
+          npm ci
         env:
           CI: true
 
@@ -215,6 +225,9 @@ jobs:
     needs: [config, test_unit]
     if: needs.config.outputs.tag
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:update_draft_release:${{ github.ref }}'
+      cancel-in-progress: true
     outputs:
       upload_url: ${{ steps.draft_release.outputs.upload_url }}
     permissions:
@@ -233,18 +246,21 @@ jobs:
     needs: [config, test_unit, update_draft_release]
     if: needs.config.outputs.tag
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:release_github:${{ github.ref }}'
+      cancel-in-progress: true
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
@@ -266,13 +282,16 @@ jobs:
     needs: [config, test_unit]
     if: needs.config.outputs.tag || needs.config.outputs.isMainBranch == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:release_npm:${{ github.ref }}'
+      cancel-in-progress: true
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -284,18 +303,18 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
       - name: install
         run: |
-          npx -y npm-ci-please@^1.1.1
+          npm ci
         env:
           CI: true
 
@@ -311,6 +330,9 @@ jobs:
     needs: [config, test_unit]
     if: needs.config.outputs.canUseSauce == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:test_functional_required:${{ matrix.config }}:${{ github.ref }}'
+      cancel-in-progress: true
     name: test_functional_required (${{ matrix.config }})
     strategy:
       fail-fast: true
@@ -330,10 +352,10 @@ jobs:
             uaVersion: '75.0'
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -345,17 +367,17 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
       - name: start SauceConnect tunnel
-        uses: saucelabs/sauce-connect-action@b632f7b7d4c5fce8bac327911322b033330b04ab
+        uses: saucelabs/sauce-connect-action@270345f214aca56f55c678ca59e626dfd43da153 #v2
         with:
           username: ${{ secrets.SAUCE_USERNAME }}
           accessKey: ${{ secrets.SAUCE_ACCESS_KEY }}
@@ -364,7 +386,7 @@ jobs:
 
       - name: install
         run: |
-          npx -y npm-ci-please@^1.1.1
+          npm ci
         env:
           CI: true
 
@@ -384,6 +406,9 @@ jobs:
   test_functional_optional:
     needs: test_functional_required
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:test_functional_optional:${{ matrix.config }}:${{ github.ref }}'
+      cancel-in-progress: true
     continue-on-error: true
     name: test_functional_optional (${{ matrix.config }})
     strategy:
@@ -391,18 +416,18 @@ jobs:
       max-parallel: 8
       matrix:
         include:
-          - config: safari-macOS_10.15
+          - config: safari-macOS_13
             ua: safari
-            os: macOS 10.15
+            os: macOS 13
           - config: firefox-win_10
             ua: firefox
             os: Windows 10
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -414,17 +439,17 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
       - name: start SauceConnect tunnel
-        uses: saucelabs/sauce-connect-action@b632f7b7d4c5fce8bac327911322b033330b04ab
+        uses: saucelabs/sauce-connect-action@270345f214aca56f55c678ca59e626dfd43da153 #v2
         with:
           username: ${{ secrets.SAUCE_USERNAME }}
           accessKey: ${{ secrets.SAUCE_ACCESS_KEY }}
@@ -433,7 +458,7 @@ jobs:
 
       - name: install
         run: |
-          npx -y npm-ci-please@^1.1.1
+          npm ci
         env:
           CI: true
 

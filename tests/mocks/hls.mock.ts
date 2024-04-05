@@ -1,5 +1,6 @@
 import Hls from '../../src/hls';
 import { EventEmitter } from 'eventemitter3';
+import { logger } from '../../src/utils/logger';
 import type { HlsEventEmitter, HlsListeners } from '../../src/events';
 import type { HlsConfig } from '../../src/config';
 import type { Level } from '../../src/types/level';
@@ -26,6 +27,7 @@ export default class HlsMock extends EventEmitter implements HlsEventEmitter {
     // Mock arguments can at will override the default config
     // and have to specify things that are not in the default config
     this.config = Object.assign({}, Hls.DefaultConfig, config);
+    this.logger = logger;
     // stub public API with spies
     publicMethods.forEach((methodName) => {
       this[methodName] = sinon.stub();
@@ -33,7 +35,7 @@ export default class HlsMock extends EventEmitter implements HlsEventEmitter {
     // add spies to event emitters
     this.trigger = <E extends keyof HlsListeners>(
       event: E,
-      eventObject: Parameters<HlsListeners[E]>[1]
+      eventObject: Parameters<HlsListeners[E]>[1],
     ): boolean => this.emit(event as string, event, eventObject);
     sinon.spy(this, 'on');
     sinon.spy(this, 'once');

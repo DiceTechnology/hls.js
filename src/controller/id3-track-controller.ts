@@ -26,15 +26,13 @@ declare global {
   }
 }
 
-type Cue = VTTCue | TextTrackCue;
-
 const MIN_CUE_DURATION = 0.25;
 
 const isPlayStation4 = () => {
   return /PlayStation 4/i.test(navigator.userAgent);
 };
 
-function getCueClass() {
+function getCueClass(): typeof VTTCue | typeof TextTrackCue | undefined {
   if (typeof self === 'undefined') return undefined;
 
   // Attempt to recreate Safari functionality by creating
@@ -47,12 +45,35 @@ function getCueClass() {
     self.TextTrackCue) as any;
 }
 
+function createCueWithDataFields(
+  Cue: typeof VTTCue | typeof TextTrackCue,
+  startTime: number,
+  endTime: number,
+  data: Object,
+  type?: string,
+): VTTCue | TextTrackCue | undefined {
+  let cue = new Cue(startTime, endTime, '');
+  try {
+    (cue as any).value = data;
+    if (type) {
+      (cue as any).type = type;
+    }
+  } catch (e) {
+    cue = new Cue(
+      startTime,
+      endTime,
+      JSON.stringify(type ? { type, ...data } : data),
+    );
+  }
+  return cue;
+}
+
 // VTTCue latest draft allows an infinite duration, fallback
 // to MAX_VALUE if necessary
 const MAX_CUE_ENDTIME = (() => {
   const Cue = getCueClass();
   try {
-    new Cue(0, Number.POSITIVE_INFINITY, '');
+    Cue && new Cue(0, Number.POSITIVE_INFINITY, '');
   } catch (e) {
     return Number.MAX_VALUE;
   }
@@ -69,7 +90,7 @@ function hexToArrayBuffer(str): ArrayBuffer {
       .replace(/^0x/, '')
       .replace(/([\da-fA-F]{2}) ?/g, '0x$1 ')
       .replace(/ +$/, '')
-      .split(' ')
+      .split(' '),
   ).buffer;
 }
 class ID3TrackController implements ComponentAPI {
@@ -78,7 +99,11 @@ class ID3TrackController implements ComponentAPI {
   private media: HTMLMediaElement | null = null;
   private dateRangeCuesAppended: Record<
     string,
-    { cues: Record<string, Cue>; dateRange: DateRange; durationKnown: boolean }
+    {
+      cues: Record<string, VTTCue | TextTrackCue>;
+      dateRange: DateRange;
+      durationKnown: boolean;
+    }
   > = {};
 
   constructor(hls) {
@@ -118,17 +143,16 @@ class ID3TrackController implements ComponentAPI {
   // Add ID3 metatadata text track.
   protected onMediaAttached(
     event: Events.MEDIA_ATTACHED,
-    data: MediaAttachedData
+    data: MediaAttachedData,
   ): void {
     this.media = data.media;
   }
 
   protected onMediaDetaching(): void {
-    if (!this.id3Track) {
-      return;
+    if (this.id3Track) {
+      clearCurrentCues(this.id3Track);
+      this.id3Track = null;
     }
-    clearCurrentCues(this.id3Track);
-    this.id3Track = null;
     this.media = null;
     this.dateRangeCuesAppended = {};
   }
@@ -162,7 +186,7 @@ class ID3TrackController implements ComponentAPI {
 
   onFragParsingMetadata(
     event: Events.FRAG_PARSING_METADATA,
-    data: FragParsingMetadataData
+    data: FragParsingMetadataData,
   ) {
     if (!this.media) {
       return;
@@ -185,6 +209,9 @@ class ID3TrackController implements ComponentAPI {
     }
 
     const Cue = getCueClass();
+    if (!Cue) {
+      return;
+    }
 
     for (let i = 0; i < samples.length; i++) {
       const type = samples[i].type;
@@ -214,26 +241,33 @@ class ID3TrackController implements ComponentAPI {
           // Safari doesn't put the timestamp frame in the TextTrack
           if (!ID3.isTimeStampFrame(frame)) {
             // add a bounds to any unbounded cues
-            this.updateId3CueEnds(startTime);
-
-            const cue = new Cue(startTime, endTime, '');
-            cue.value = frame;
-            if (type) {
-              cue.type = type;
+            this.updateId3CueEnds(startTime, type);
+            const cue = createCueWithDataFields(
+              Cue,
+              startTime,
+              endTime,
+              frame,
+              type,
+            );
+            if (cue) {
+              this.id3Track.addCue(cue);
             }
-            this.id3Track.addCue(cue);
           }
         }
       }
     }
   }
 
-  updateId3CueEnds(startTime: number) {
+  updateId3CueEnds(startTime: number, type: MetadataSchema) {
     const cues = this.id3Track?.cues;
     if (cues) {
       for (let i = cues.length; i--; ) {
         const cue = cues[i] as any;
-        if (cue.startTime < startTime && cue.endTime === MAX_CUE_ENDTIME) {
+        if (
+          cue.type === type &&
+          cue.startTime < startTime &&
+          cue.endTime === MAX_CUE_ENDTIME
+        ) {
           cue.endTime = startTime;
         }
       }
@@ -242,7 +276,7 @@ class ID3TrackController implements ComponentAPI {
 
   onBufferFlushing(
     event: Events.BUFFER_FLUSHING,
-    { startOffset, endOffset, type }: BufferFlushingData
+    { startOffset, endOffset, type }: BufferFlushingData,
   ) {
     const { id3Track, hls } = this;
     if (!hls) {
@@ -286,7 +320,7 @@ class ID3TrackController implements ComponentAPI {
     // Remove cues from track not found in details.dateRanges
     if (id3Track) {
       const idsToRemove = Object.keys(dateRangeCuesAppended).filter(
-        (id) => !ids.includes(id)
+        (id) => !ids.includes(id),
       );
       for (let i = idsToRemove.length; i--; ) {
         const id = idsToRemove[i];
@@ -313,65 +347,81 @@ class ID3TrackController implements ComponentAPI {
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       const dateRange = dateRanges[id];
+      const startTime = dateRangeDateToTimelineSeconds(
+        dateRange.startDate,
+        dateTimeOffset,
+      );
+
+      // Process DateRanges to determine end-time (known DURATION, END-DATE, or END-ON-NEXT)
       const appendedDateRangeCues = dateRangeCuesAppended[id];
       const cues = appendedDateRangeCues?.cues || {};
       let durationKnown = appendedDateRangeCues?.durationKnown || false;
-      const startTime = dateRangeDateToTimelineSeconds(
-        dateRange.startDate,
-        dateTimeOffset
-      );
       let endTime = MAX_CUE_ENDTIME;
       const endDate = dateRange.endDate;
       if (endDate) {
         endTime = dateRangeDateToTimelineSeconds(endDate, dateTimeOffset);
         durationKnown = true;
       } else if (dateRange.endOnNext && !durationKnown) {
-        const nextDateRangeWithSameClass = ids
-          .reduce((filterMapArray, id) => {
-            const candidate = dateRanges[id];
-            if (
-              candidate.class === dateRange.class &&
-              candidate.id !== id &&
-              candidate.startDate > dateRange.startDate
-            ) {
-              filterMapArray.push(candidate);
+        const nextDateRangeWithSameClass = ids.reduce(
+          (candidateDateRange: DateRange | null, id) => {
+            if (id !== dateRange.id) {
+              const otherDateRange = dateRanges[id];
+              if (
+                otherDateRange.class === dateRange.class &&
+                otherDateRange.startDate > dateRange.startDate &&
+                (!candidateDateRange ||
+                  dateRange.startDate < candidateDateRange.startDate)
+              ) {
+                return otherDateRange;
+              }
             }
-            return filterMapArray;
-          }, [] as DateRange[])
-          .sort((a, b) => a.startDate.getTime() - b.startDate.getTime())[0];
+            return candidateDateRange;
+          },
+          null,
+        );
         if (nextDateRangeWithSameClass) {
           endTime = dateRangeDateToTimelineSeconds(
             nextDateRangeWithSameClass.startDate,
-            dateTimeOffset
+            dateTimeOffset,
           );
           durationKnown = true;
         }
       }
 
+      // Create TextTrack Cues for each MetadataGroup Item (select DateRange attribute)
+      // This is to emulate Safari HLS playback handling of DateRange tags
       const attributes = Object.keys(dateRange.attr);
       for (let j = 0; j < attributes.length; j++) {
         const key = attributes[j];
         if (!isDateRangeCueAttribute(key)) {
           continue;
         }
-        let cue = cues[key] as any;
+        const cue = cues[key];
         if (cue) {
           if (durationKnown && !appendedDateRangeCues.durationKnown) {
             cue.endTime = endTime;
           }
-        } else {
+        } else if (Cue) {
           let data = dateRange.attr[key];
-          cue = new Cue(startTime, endTime, '');
           if (isSCTE35Attribute(key)) {
             data = hexToArrayBuffer(data);
           }
-          cue.value = { key, data };
-          cue.type = MetadataSchema.dateRange;
-          cue.id = id;
-          this.id3Track.addCue(cue);
-          cues[key] = cue;
+          const cue = createCueWithDataFields(
+            Cue,
+            startTime,
+            endTime,
+            { key, data },
+            MetadataSchema.dateRange,
+          );
+          if (cue) {
+            cue.id = id;
+            this.id3Track.addCue(cue);
+            cues[key] = cue;
+          }
         }
       }
+
+      // Keep track of processed DateRanges by ID for updating cues with new DateRange tag attributes
       dateRangeCuesAppended[id] = {
         cues,
         dateRange,

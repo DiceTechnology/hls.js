@@ -56,7 +56,7 @@ export class LevelDetails {
   public variableList: VariableMap | null = null;
   public hasVariableRefs = false;
 
-  constructor(baseUrl) {
+  constructor(baseUrl: string) {
     this.fragments = [];
     this.encryptedFragments = [];
     this.dateRanges = {};
@@ -72,7 +72,10 @@ export class LevelDetails {
     const partSnDiff = this.lastPartSn - previous.lastPartSn;
     const partIndexDiff = this.lastPartIndex - previous.lastPartIndex;
     this.updated =
-      this.endSN !== previous.endSN || !!partIndexDiff || !!partSnDiff;
+      this.endSN !== previous.endSN ||
+      !!partIndexDiff ||
+      !!partSnDiff ||
+      !this.live;
     this.advanced =
       this.endSN > previous.endSN ||
       partSnDiff > 0 ||
@@ -88,7 +91,7 @@ export class LevelDetails {
   get hasProgramDateTime(): boolean {
     if (this.fragments.length) {
       return Number.isFinite(
-        this.fragments[this.fragments.length - 1].programDateTime as number
+        this.fragments[this.fragments.length - 1].programDateTime as number,
       );
     }
     return false;

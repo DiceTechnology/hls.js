@@ -46,7 +46,7 @@ describe('LatencyController', function () {
       edgeStub.get(() => value);
       latencyController['onLevelUpdated'](
         Events.LEVEL_UPDATED,
-        levelUpdatedData
+        levelUpdatedData,
       );
     });
     const ageStub = sinon.stub(levelDetails, 'age');
@@ -55,7 +55,7 @@ describe('LatencyController', function () {
       ageStub.get(() => value);
       latencyController['onLevelUpdated'](
         Events.LEVEL_UPDATED,
-        levelUpdatedData
+        levelUpdatedData,
       );
     });
     let currentTime = 0;
@@ -79,7 +79,7 @@ describe('LatencyController', function () {
     currentTimeStub.get(() => currentTime);
     currentTimeStub.set((value: number) => {
       currentTime = value;
-      latencyController['timeupdate']();
+      latencyController['onTimeupdate']();
     });
   });
 

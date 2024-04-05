@@ -1,3 +1,4 @@
+import EventEmitter from 'eventemitter3';
 import {
   getAudioConfig,
   isHeaderPattern,
@@ -9,29 +10,30 @@ import {
   getFrameDuration,
   parseFrameHeader,
   appendFrame,
-} from '../../../src/demux/adts';
+} from '../../../src/demux/audio/adts';
 import { ErrorTypes } from '../../../src/errors';
 import sinon from 'sinon';
 
 describe('getAudioConfig', function () {
-  it('should trigger a MEDIA_ERROR event if sample index is invalid', function () {
-    const observer = {
-      trigger: sinon.spy(),
-    };
+  it('should emit a MEDIA_ERROR event if sample index is invalid', function () {
+    const observer = new EventEmitter();
+    sinon.spy(observer, 'emit');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
     data[2] = 0x34; // sampling_frequency_index = 14, which is a reserved value
 
     expect(getAudioConfig(observer, data, 0, 'mp4a.40.29')).to.not.exist;
-    expect(observer.trigger).to.have.been.calledOnce;
-    expect(observer.trigger.args[0][1].type).to.equal(ErrorTypes.MEDIA_ERROR);
+    expect(observer.emit).to.have.been.calledOnce;
+    expect(observer.emit.args[0][2].type).to.equal(
+      ErrorTypes.MEDIA_ERROR,
+      JSON.stringify(observer.emit.args, null, 2),
+    );
   });
 
   it('should return audio config for firefox if the specified sampling frequency > 24kHz', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'firefox'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'firefox');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -42,14 +44,14 @@ describe('getAudioConfig', function () {
       samplerate: 96000,
       channelCount: 0,
       codec: 'mp4a.40.2',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.29',
     });
   });
 
   it('should return audio config with a different extension sampling index for Firefox if sampling freq is low', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Firefox'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Firefox');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -60,14 +62,14 @@ describe('getAudioConfig', function () {
       samplerate: 11025,
       channelCount: 0,
       codec: 'mp4a.40.5',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.29',
     });
   });
 
   it('should return audio config for Android', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Android'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Android');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -78,14 +80,14 @@ describe('getAudioConfig', function () {
       samplerate: 11025,
       channelCount: 0,
       codec: 'mp4a.40.2',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.29',
     });
   });
 
   it('should return audio config for Chrome', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Chrome'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Chrome');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -96,14 +98,14 @@ describe('getAudioConfig', function () {
       samplerate: 11025,
       channelCount: 0,
       codec: 'mp4a.40.5',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.29',
     });
   });
 
   it('should return audio config for Chrome if there is no audio codec', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Chrome'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Chrome');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -114,14 +116,14 @@ describe('getAudioConfig', function () {
       samplerate: 11025,
       channelCount: 0,
       codec: 'mp4a.40.5',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: undefined,
     });
   });
 
   it('should return audio config for Chrome if there is no audio codec and freq is high enough', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Chrome'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Chrome');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -132,14 +134,14 @@ describe('getAudioConfig', function () {
       samplerate: 64000,
       channelCount: 0,
       codec: 'mp4a.40.5',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: undefined,
     });
   });
 
   it('should return audio config for Chrome if audio codec is "mp4a.40.5"', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Chrome'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Chrome');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -150,14 +152,14 @@ describe('getAudioConfig', function () {
       samplerate: 11025,
       channelCount: 0,
       codec: 'mp4a.40.5',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.5',
     });
   });
 
   it('should return audio config for Chrome if audio codec is "mp4a.40.2"', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Chrome'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Chrome');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -169,14 +171,14 @@ describe('getAudioConfig', function () {
       samplerate: 11025,
       channelCount: 1,
       codec: 'mp4a.40.2',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.2',
     });
   });
 
   it('should return audio config for Vivaldi', function () {
-    const observer = {
-      trigger: sinon.stub(navigator, 'userAgent').get(() => 'Vivaldi'),
-    };
+    const observer = new EventEmitter();
+    sinon.stub(navigator, 'userAgent').get(() => 'Vivaldi');
     const data = new Uint8Array(new ArrayBuffer(4));
     data[0] = 0xff;
     data[1] = 0xf0; // ID = 0 (MPEG-4), layer = 00, protection_absent = 0
@@ -187,6 +189,7 @@ describe('getAudioConfig', function () {
       samplerate: 64000,
       channelCount: 0,
       codec: 'mp4a.40.2',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.2',
     });
   });
@@ -356,6 +359,7 @@ describe('initTrackConfig', function () {
       samplerate: 11025,
       channelCount: 0,
       codec: 'mp4a.40.5',
+      parsedCodec: 'mp4a.40.1',
       manifestCodec: 'mp4a.40.29',
     });
   });

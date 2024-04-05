@@ -41,7 +41,7 @@ export default class FragmentLoader {
 
   load(
     frag: Fragment,
-    onProgress?: FragmentLoadProgressCallback
+    onProgress?: FragmentLoadProgressCallback,
   ): Promise<FragLoadedData> {
     const url = frag.url;
     if (!url) {
@@ -52,10 +52,10 @@ export default class FragmentLoader {
           fatal: false,
           frag,
           error: new Error(
-            `Fragment does not have a ${url ? 'part list' : 'url'}`
+            `Fragment does not have a ${url ? 'part list' : 'url'}`,
           ),
           networkDetails: null,
-        })
+        }),
       );
     }
     this.abort();
@@ -69,8 +69,13 @@ export default class FragmentLoader {
         this.loader.destroy();
       }
       if (frag.gap) {
-        reject(createGapLoadError(frag));
-        return;
+        if (frag.tagList.some((tags) => tags[0] === 'GAP')) {
+          reject(createGapLoadError(frag));
+          return;
+        } else {
+          // Reset temporary treatment as GAP tag
+          frag.gap = false;
+        }
       }
       const loader =
         (this.loader =
@@ -80,7 +85,7 @@ export default class FragmentLoader {
             : (new DefaultILoader(config) as Loader<FragmentLoaderContext>));
       const loaderContext = createLoaderContext(frag);
       const loadPolicy = getLoaderConfigWithoutReties(
-        config.fragLoadPolicy.default
+        config.fragLoadPolicy.default,
       );
       const loaderConfig: LoaderConfiguration = {
         loadPolicy,
@@ -119,7 +124,7 @@ export default class FragmentLoader {
               error: new Error(`HTTP Error ${response.code} ${response.text}`),
               networkDetails,
               stats,
-            })
+            }),
           );
         },
         onAbort: (stats, context, networkDetails) => {
@@ -133,7 +138,7 @@ export default class FragmentLoader {
               error: new Error('Aborted'),
               networkDetails,
               stats,
-            })
+            }),
           );
         },
         onTimeout: (stats, context, networkDetails) => {
@@ -147,7 +152,7 @@ export default class FragmentLoader {
               error: new Error(`Timeout after ${loaderConfig.timeout}ms`),
               networkDetails,
               stats,
-            })
+            }),
           );
         },
         onProgress: (stats, context, data, networkDetails) => {
@@ -167,7 +172,7 @@ export default class FragmentLoader {
   public loadPart(
     frag: Fragment,
     part: Part,
-    onProgress: FragmentLoadProgressCallback
+    onProgress: FragmentLoadProgressCallback,
   ): Promise<FragLoadedData> {
     this.abort();
 
@@ -192,7 +197,7 @@ export default class FragmentLoader {
       const loaderContext = createLoaderContext(frag, part);
       // Should we define another load policy for parts?
       const loadPolicy = getLoaderConfigWithoutReties(
-        config.fragLoadPolicy.default
+        config.fragLoadPolicy.default,
       );
       const loaderConfig: LoaderConfiguration = {
         loadPolicy,
@@ -234,7 +239,7 @@ export default class FragmentLoader {
               error: new Error(`HTTP Error ${response.code} ${response.text}`),
               networkDetails,
               stats,
-            })
+            }),
           );
         },
         onAbort: (stats, context, networkDetails) => {
@@ -250,7 +255,7 @@ export default class FragmentLoader {
               error: new Error('Aborted'),
               networkDetails,
               stats,
-            })
+            }),
           );
         },
         onTimeout: (stats, context, networkDetails) => {
@@ -265,7 +270,7 @@ export default class FragmentLoader {
               error: new Error(`Timeout after ${loaderConfig.timeout}ms`),
               networkDetails,
               stats,
-            })
+            }),
           );
         },
       });
@@ -281,7 +286,7 @@ export default class FragmentLoader {
       const estTotalParts = Math.round(frag.duration / part.duration);
       const estLoadedParts = Math.min(
         Math.round(fragStats.loaded / partTotal),
-        estTotalParts
+        estTotalParts,
       );
       const estRemainingParts = estTotalParts - estLoadedParts;
       const estRemainingBytes =
@@ -314,7 +319,7 @@ export default class FragmentLoader {
 
 function createLoaderContext(
   frag: Fragment,
-  part: Part | null = null
+  part: Part | null = null,
 ): FragmentLoaderContext {
   const segment: BaseSegment = part || frag;
   const loaderContext: FragmentLoaderContext = {
@@ -326,13 +331,16 @@ function createLoaderContext(
     rangeStart: 0,
     rangeEnd: 0,
   };
-  const start = segment.byteRangeStartOffset;
-  const end = segment.byteRangeEndOffset;
+  const start = segment.byteRangeStartOffset as number;
+  const end = segment.byteRangeEndOffset as number;
   if (Number.isFinite(start) && Number.isFinite(end)) {
     let byteRangeStart = start;
     let byteRangeEnd = end;
-    if (frag.sn === 'initSegment' && frag.decryptdata?.method === 'AES-128') {
-      // MAP segment encrypted with method 'AES-128', when served with HTTP Range,
+    if (
+      frag.sn === 'initSegment' &&
+      isMethodFullSegmentAesCbc(frag.decryptdata?.method)
+    ) {
+      // MAP segment encrypted with method 'AES-128' or 'AES-256' (cbc), when served with HTTP Range,
       // has the unencrypted size specified in the range.
       // Ref: https://tools.ietf.org/html/draft-pantos-hls-rfc8216bis-08#section-6.3.6
       const fragmentLen = end - start;
@@ -367,6 +375,10 @@ function createGapLoadError(frag: Fragment, part?: Part): LoadError {
   return new LoadError(errorData);
 }
 
+function isMethodFullSegmentAesCbc(method) {
+  return method === 'AES-128' || method === 'AES-256';
+}
+
 export class LoadError extends Error {
   public readonly data: FragLoadFailResult;
   constructor(data: FragLoadFailResult) {
@@ -390,5 +402,5 @@ export interface FragLoadFailResult extends ErrorData {
 }
 
 export type FragmentLoadProgressCallback = (
-  result: FragLoadedData | PartsLoadedData
+  result: FragLoadedData | PartsLoadedData,
 ) => void;

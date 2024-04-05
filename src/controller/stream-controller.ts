@@ -7,7 +7,7 @@ import { PlaylistContextType, PlaylistLevelType } from '../types/loader';
 import { ElementaryStreamTypes, Fragment } from '../loader/fragment';
 import TransmuxerInterface from '../demux/transmuxer-interface';
 import { ChunkMetadata } from '../types/transmuxer';
-import GapController from './gap-controller';
+import GapController, { MAX_START_GAP_JUMP } from './gap-controller';
 import { ErrorDetails } from '../errors';
 import type { NetworkComponentAPI } from '../types/component-api';
 import type Hls from '../hls';
@@ -50,8 +50,6 @@ export default class StreamController
   private altAudio: boolean = false;
   private audioOnly: boolean = false;
   private fragPlaying: Fragment | null = null;
-  private onvplaying: EventListener | null = null;
-  private onvseeked: EventListener | null = null;
   private fragLastKbps: number = 0;
   private couldBacktrack: boolean = false;
   private backtrackFragment: Fragment | null = null;
@@ -61,32 +59,29 @@ export default class StreamController
   constructor(
     hls: Hls,
     fragmentTracker: FragmentTracker,
-    keyLoader: KeyLoader
+    keyLoader: KeyLoader,
   ) {
     super(
       hls,
       fragmentTracker,
       keyLoader,
-      '[stream-controller]',
-      PlaylistLevelType.MAIN
+      'stream-controller',
+      PlaylistLevelType.MAIN,
     );
-    this._registerListeners();
+    this.registerListeners();
   }
 
-  private _registerListeners() {
+  protected registerListeners() {
+    super.registerListeners();
     const { hls } = this;
-    hls.on(Events.MEDIA_ATTACHED, this.onMediaAttached, this);
-    hls.on(Events.MEDIA_DETACHING, this.onMediaDetaching, this);
-    hls.on(Events.MANIFEST_LOADING, this.onManifestLoading, this);
     hls.on(Events.MANIFEST_PARSED, this.onManifestParsed, this);
     hls.on(Events.LEVEL_LOADING, this.onLevelLoading, this);
     hls.on(Events.LEVEL_LOADED, this.onLevelLoaded, this);
     hls.on(
       Events.FRAG_LOAD_EMERGENCY_ABORTED,
       this.onFragLoadEmergencyAborted,
-      this
+      this,
     );
-    hls.on(Events.ERROR, this.onError, this);
     hls.on(Events.AUDIO_TRACK_SWITCHING, this.onAudioTrackSwitching, this);
     hls.on(Events.AUDIO_TRACK_SWITCHED, this.onAudioTrackSwitched, this);
     hls.on(Events.BUFFER_CREATED, this.onBufferCreated, this);
@@ -96,19 +91,16 @@ export default class StreamController
     hls.on(Events.VIDEO_PTS_NEEDED, this.onVideoPtsNeeded, this);
   }
 
-  protected _unregisterListeners() {
+  protected unregisterListeners() {
+    super.unregisterListeners();
     const { hls } = this;
-    hls.off(Events.MEDIA_ATTACHED, this.onMediaAttached, this);
-    hls.off(Events.MEDIA_DETACHING, this.onMediaDetaching, this);
-    hls.off(Events.MANIFEST_LOADING, this.onManifestLoading, this);
     hls.off(Events.MANIFEST_PARSED, this.onManifestParsed, this);
     hls.off(Events.LEVEL_LOADED, this.onLevelLoaded, this);
     hls.off(
       Events.FRAG_LOAD_EMERGENCY_ABORTED,
       this.onFragLoadEmergencyAborted,
-      this
+      this,
     );
-    hls.off(Events.ERROR, this.onError, this);
     hls.off(Events.AUDIO_TRACK_SWITCHING, this.onAudioTrackSwitching, this);
     hls.off(Events.AUDIO_TRACK_SWITCHED, this.onAudioTrackSwitched, this);
     hls.off(Events.BUFFER_CREATED, this.onBufferCreated, this);
@@ -119,8 +111,10 @@ export default class StreamController
   }
 
   protected onHandlerDestroying() {
-    this._unregisterListeners();
-    this.onMediaDetaching();
+    // @ts-ignore
+    this.onMediaPlaying = this.onMediaSeeked = null;
+    this.unregisterListeners();
+    super.onHandlerDestroying();
   }
 
   public startLoad(startPosition: number): void {
@@ -138,20 +132,21 @@ export default class StreamController
             startLevel = 0;
             this.bitrateTest = true;
           } else {
-            startLevel = hls.nextAutoLevel;
+            startLevel = hls.firstAutoLevel;
           }
         }
         // set new level to playlist loader : this will trigger start level load
         // hls.nextLoadLevel remains until it is set to a new value or until a new frag is successfully loaded
-        this.level = hls.nextLoadLevel = startLevel;
+        hls.nextLoadLevel = startLevel;
+        this.level = hls.loadLevel;
         this.loadedmetadata = false;
       }
       // if startPosition undefined but lastCurrentTime set, set startPosition to last currentTime
       if (lastCurrentTime > 0 && startPosition === -1) {
         this.log(
           `Override startPosition with lastCurrentTime @${lastCurrentTime.toFixed(
-            3
-          )}`
+            3,
+          )}`,
         );
         startPosition = lastCurrentTime;
       }
@@ -176,11 +171,18 @@ export default class StreamController
     switch (this.state) {
       case State.WAITING_LEVEL: {
         const { levels, level } = this;
-        const details = levels?.[level]?.details;
-        if (details && (!details.live || this.levelLastLoaded === this.level)) {
+        const currentLevel = levels?.[level];
+        const details = currentLevel?.details;
+        if (
+          details &&
+          (!details.live || this.levelLastLoaded === currentLevel)
+        ) {
           if (this.waitForCdnTuneIn(details)) {
             break;
           }
+          this.state = State.IDLE;
+          break;
+        } else if (this.hls.nextLoadLevel !== this.level) {
           this.state = State.IDLE;
           break;
         }
@@ -192,7 +194,9 @@ export default class StreamController
           const retryDate = this.retryDate;
           // if current time is gt than retryDate, or if media seeking let's switch to IDLE state to retry loading
           if (!retryDate || now >= retryDate || this.media?.seeking) {
-            this.resetStartWhenNotLoaded(this.level);
+            const { levels, level } = this;
+            const currentLevel = levels?.[level];
+            this.resetStartWhenNotLoaded(currentLevel || null);
             this.state = State.IDLE;
           }
         }
@@ -213,15 +217,17 @@ export default class StreamController
   }
 
   private doTickIdle() {
+    if (!this.buffering) {
+      return;
+    }
     const { hls, levelLastLoaded, levels, media } = this;
-    const { config, nextLoadLevel: level } = hls;
 
     // if start level not parsed yet OR
     // if video not attached AND start fragment already requested OR start frag prefetch not enabled
     // exit loop, as we either need more info (level not parsed) or we need media to be attached to load new fragment
     if (
       levelLastLoaded === null ||
-      (!media && (this.startFragRequested || !config.startFragPrefetch))
+      (!media && (this.startFragRequested || !hls.config.startFragPrefetch))
     ) {
       return;
     }
@@ -231,6 +237,7 @@ export default class StreamController
       return;
     }
 
+    const level = hls.nextLoadLevel;
     if (!levels?.[level]) {
       return;
     }
@@ -269,7 +276,7 @@ export default class StreamController
     if (
       !levelDetails ||
       this.state === State.WAITING_LEVEL ||
-      (levelDetails.live && this.levelLastLoaded !== level)
+      (levelDetails.live && this.levelLastLoaded !== levelInfo)
     ) {
       this.level = level;
       this.state = State.WAITING_LEVEL;
@@ -336,7 +343,7 @@ export default class StreamController
         levelDetails,
         bufferInfo,
         PlaylistLevelType.MAIN,
-        maxBufLen
+        maxBufLen,
       );
     }
     if (!frag) {
@@ -352,7 +359,7 @@ export default class StreamController
   protected loadFragment(
     frag: Fragment,
     level: Level,
-    targetBufferTime: number
+    targetBufferTime: number,
   ) {
     // Check if fragment is not loaded
     const fragState = this.fragmentTracker.getState(frag);
@@ -365,7 +372,7 @@ export default class StreamController
         this._loadInitSegment(frag, level);
       } else if (this.bitrateTest) {
         this.log(
-          `Fragment ${frag.sn} of level ${frag.level} is being downloaded to test bitrate and will not be buffered`
+          `Fragment ${frag.sn} of level ${frag.level} is being downloaded to test bitrate and will not be buffered`,
         );
         this._loadBitrateTestFrag(frag, level);
       } else {
@@ -380,7 +387,7 @@ export default class StreamController
   private getBufferedFrag(position) {
     return this.fragmentTracker.getBufferedFrag(
       position,
-      PlaylistLevelType.MAIN
+      PlaylistLevelType.MAIN,
     );
   }
 
@@ -464,10 +471,10 @@ export default class StreamController
               Math.min(
                 Math.max(
                   fragDuration - this.config.maxFragLookUpTolerance,
-                  fragDuration * 0.5
+                  fragDuration * (this.couldBacktrack ? 0.5 : 0.125),
                 ),
-                fragDuration * 0.75
-              )
+                fragDuration * (this.couldBacktrack ? 0.75 : 0.25),
+              ),
           );
           this.flushMainBuffer(startPts, Number.POSITIVE_INFINITY);
         }
@@ -499,36 +506,33 @@ export default class StreamController
     super.flushMainBuffer(
       startOffset,
       endOffset,
-      this.altAudio ? 'video' : null
+      this.altAudio ? 'video' : null,
     );
   }
 
   protected onMediaAttached(
     event: Events.MEDIA_ATTACHED,
-    data: MediaAttachedData
+    data: MediaAttachedData,
   ) {
     super.onMediaAttached(event, data);
     const media = data.media;
-    this.onvplaying = this.onMediaPlaying.bind(this);
-    this.onvseeked = this.onMediaSeeked.bind(this);
-    media.addEventListener('playing', this.onvplaying as EventListener);
-    media.addEventListener('seeked', this.onvseeked as EventListener);
+    media.addEventListener('playing', this.onMediaPlaying);
+    media.addEventListener('seeked', this.onMediaSeeked);
     this.gapController = new GapController(
       this.config,
       media,
       this.fragmentTracker,
-      this.hls
+      this.hls,
     );
   }
 
   protected onMediaDetaching() {
     const { media } = this;
-    if (media && this.onvplaying && this.onvseeked) {
-      media.removeEventListener('playing', this.onvplaying);
-      media.removeEventListener('seeked', this.onvseeked);
-      this.onvplaying = this.onvseeked = null;
-      this.videoBuffer = null;
+    if (media) {
+      media.removeEventListener('playing', this.onMediaPlaying);
+      media.removeEventListener('seeked', this.onMediaSeeked);
     }
+    this.videoBuffer = null;
     this.fragPlaying = null;
     if (this.gapController) {
       this.gapController.destroy();
@@ -537,12 +541,12 @@ export default class StreamController
     super.onMediaDetaching();
   }
 
-  private onMediaPlaying() {
+  private onMediaPlaying = () => {
     // tick to speed up FRAG_CHANGED triggering
     this.tick();
-  }
+  };
 
-  private onMediaSeeked() {
+  private onMediaSeeked = () => {
     const media = this.media;
     const currentTime = media ? media.currentTime : null;
     if (Number.isFinite(currentTime)) {
@@ -555,50 +559,48 @@ export default class StreamController
       this.warn(
         `Main forward buffer length on "seeked" event ${
           bufferInfo ? bufferInfo.len : 'empty'
-        })`
+        })`,
       );
       return;
     }
 
     // tick to speed up FRAG_CHANGED triggering
     this.tick();
-  }
+  };
 
-  private onManifestLoading() {
+  protected onManifestLoading() {
     // reset buffer on manifest loading
     this.log('Trigger BUFFER_RESET');
     this.hls.trigger(Events.BUFFER_RESET, undefined);
     this.fragmentTracker.removeAllFragments();
     this.couldBacktrack = false;
-    this.startPosition = this.lastCurrentTime = 0;
-    this.levels = this.fragPlaying = this.backtrackFragment = null;
-    this.altAudio = this.audioOnly = false;
+    this.startPosition = this.lastCurrentTime = this.fragLastKbps = 0;
+    this.levels =
+      this.fragPlaying =
+      this.backtrackFragment =
+      this.levelLastLoaded =
+        null;
+    this.altAudio = this.audioOnly = this.startFragRequested = false;
   }
 
   private onManifestParsed(
     event: Events.MANIFEST_PARSED,
-    data: ManifestParsedData
+    data: ManifestParsedData,
   ) {
+    // detect if we have different kind of audio codecs used amongst playlists
     let aac = false;
     let heaac = false;
-    let codec;
     data.levels.forEach((level) => {
-      // detect if we have different kind of audio codecs used amongst playlists
-      codec = level.audioCodec;
+      const codec = level.audioCodec;
       if (codec) {
-        if (codec.indexOf('mp4a.40.2') !== -1) {
-          aac = true;
-        }
-
-        if (codec.indexOf('mp4a.40.5') !== -1) {
-          heaac = true;
-        }
+        aac = aac || codec.indexOf('mp4a.40.2') !== -1;
+        heaac = heaac || codec.indexOf('mp4a.40.5') !== -1;
       }
     });
     this.audioCodecSwitch = aac && heaac && !changeTypeSupported();
     if (this.audioCodecSwitch) {
       this.log(
-        'Both AAC/HE-AAC audio found in levels; declaring level codec as HE-AAC'
+        'Both AAC/HE-AAC audio found in levels; declaring level codec as HE-AAC',
       );
     }
 
@@ -614,7 +616,7 @@ export default class StreamController
     const level = levels[data.level];
     if (
       !level.details ||
-      (level.details.live && this.levelLastLoaded !== data.level) ||
+      (level.details.live && this.levelLastLoaded !== level) ||
       this.waitForCdnTuneIn(level.details)
     ) {
       this.state = State.WAITING_LEVEL;
@@ -636,7 +638,7 @@ export default class StreamController
         newDetails.lastPartSn
           ? `[part-${newDetails.lastPartSn}-${newDetails.lastPartIndex}]`
           : ''
-      }, cc [${newDetails.startCC}, ${newDetails.endCC}] duration:${duration}`
+      }, cc [${newDetails.startCC}, ${newDetails.endCC}] duration:${duration}`,
     );
 
     const curLevel = levels[newLevelId];
@@ -646,28 +648,26 @@ export default class StreamController
       (this.state === State.FRAG_LOADING ||
         this.state === State.FRAG_LOADING_WAITING_RETRY)
     ) {
-      if (
-        (fragCurrent.level !== data.level ||
-          fragCurrent.urlId !== curLevel.urlId) &&
-        fragCurrent.loader
-      ) {
+      if (fragCurrent.level !== data.level && fragCurrent.loader) {
         this.abortCurrentFrag();
       }
     }
 
     let sliding = 0;
     if (newDetails.live || curLevel.details?.live) {
-      if (!newDetails.fragments[0]) {
-        newDetails.deltaUpdateFailed = true;
-      }
+      this.checkLiveUpdate(newDetails);
       if (newDetails.deltaUpdateFailed) {
         return;
       }
-      sliding = this.alignPlaylists(newDetails, curLevel.details);
+      sliding = this.alignPlaylists(
+        newDetails,
+        curLevel.details,
+        this.levelLastLoaded?.details,
+      );
     }
     // override level info
     curLevel.details = newDetails;
-    this.levelLastLoaded = newLevelId;
+    this.levelLastLoaded = curLevel;
 
     this.hls.trigger(Events.LEVEL_UPDATED, {
       details: newDetails,
@@ -698,7 +698,7 @@ export default class StreamController
     const { levels } = this;
     if (!levels) {
       this.warn(
-        `Levels were reset while fragment load was in progress. Fragment ${frag.sn} of level ${frag.level} will not be buffered`
+        `Levels were reset while fragment load was in progress. Fragment ${frag.sn} of level ${frag.level} will not be buffered`,
       );
       return;
     }
@@ -706,7 +706,7 @@ export default class StreamController
     const details = currentLevel.details as LevelDetails;
     if (!details) {
       this.warn(
-        `Dropping fragment ${frag.sn} of level ${frag.level} after level details were reset`
+        `Dropping fragment ${frag.sn} of level ${frag.level} after level details were reset`,
       );
       this.fragmentTracker.removeFragment(frag);
       return;
@@ -726,7 +726,7 @@ export default class StreamController
         this.hls,
         PlaylistLevelType.MAIN,
         this._handleTransmuxComplete.bind(this),
-        this._handleTransmuxerFlush.bind(this)
+        this._handleTransmuxerFlush.bind(this),
       ));
     const partIndex = part ? part.index : -1;
     const partial = partIndex !== -1;
@@ -736,7 +736,7 @@ export default class StreamController
       frag.stats.chunkCount,
       payload.byteLength,
       partIndex,
-      partial
+      partial,
     );
     const initPTS = this.initPTS[frag.cc];
 
@@ -750,13 +750,13 @@ export default class StreamController
       details.totalduration,
       accurateTimeOffset,
       chunkMeta,
-      initPTS
+      initPTS,
     );
   }
 
   private onAudioTrackSwitching(
     event: Events.AUDIO_TRACK_SWITCHING,
-    data: AudioTrackSwitchingData
+    data: AudioTrackSwitchingData,
   ) {
     // if any URL found on new audio track, it is an alternate audio track
     const fromAltAudio = this.altAudio;
@@ -767,7 +767,7 @@ export default class StreamController
     if (!altAudio) {
       if (this.mediaBuffer !== this.media) {
         this.log(
-          'Switching on main audio, use media.buffered to schedule main fragment loading'
+          'Switching on main audio, use media.buffered to schedule main fragment loading',
         );
         this.mediaBuffer = this.media;
         const fragCurrent = this.fragCurrent;
@@ -801,7 +801,7 @@ export default class StreamController
 
   private onAudioTrackSwitched(
     event: Events.AUDIO_TRACK_SWITCHED,
-    data: AudioTrackSwitchedData
+    data: AudioTrackSwitchedData,
   ) {
     const trackId = data.id;
     const altAudio = !!this.hls.audioTracks[trackId].url;
@@ -810,7 +810,7 @@ export default class StreamController
       // if we switched on alternate audio, ensure that main fragment scheduling is synced with video sourcebuffer buffered
       if (videoBuffer && this.mediaBuffer !== videoBuffer) {
         this.log(
-          'Switching on alternate audio, use video.buffered to schedule main fragment loading'
+          'Switching on alternate audio, use video.buffered to schedule main fragment loading',
         );
         this.mediaBuffer = videoBuffer;
       }
@@ -821,7 +821,7 @@ export default class StreamController
 
   private onBufferCreated(
     event: Events.BUFFER_CREATED,
-    data: BufferCreatedData
+    data: BufferCreatedData,
   ) {
     const tracks = data.tracks;
     let mediaTrack;
@@ -845,7 +845,7 @@ export default class StreamController
     }
     if (alternate && mediaTrack) {
       this.log(
-        `Alternate track found, use ${name}.buffered to schedule main fragment loading`
+        `Alternate track found, use ${name}.buffered to schedule main fragment loading`,
       );
       this.mediaBuffer = mediaTrack.buffer;
     } else {
@@ -864,7 +864,7 @@ export default class StreamController
       this.warn(
         `Fragment ${frag.sn}${part ? ' p: ' + part.index : ''} of level ${
           frag.level
-        } finished buffering, but was aborted. state: ${this.state}`
+        } finished buffering, but was aborted. state: ${this.state}`,
       );
       if (this.state === State.PARSED) {
         this.state = State.IDLE;
@@ -873,7 +873,7 @@ export default class StreamController
     }
     const stats = part ? part.stats : frag.stats;
     this.fragLastKbps = Math.round(
-      (8 * stats.total) / (stats.buffering.end - stats.loading.first)
+      (8 * stats.total) / (stats.buffering.end - stats.loading.first),
     );
     if (frag.sn !== 'initSegment') {
       this.fragPrevious = frag;
@@ -881,7 +881,7 @@ export default class StreamController
     this.fragBufferedComplete(frag, part);
   }
 
-  private onError(event: Events.ERROR, data: ErrorData) {
+  protected onError(event: Events.ERROR, data: ErrorData) {
     if (data.fatal) {
       this.state = State.ERROR;
       return;
@@ -908,8 +908,13 @@ export default class StreamController
           this.state = State.IDLE;
         }
         break;
+      case ErrorDetails.BUFFER_APPEND_ERROR:
       case ErrorDetails.BUFFER_FULL_ERROR:
         if (!data.parent || data.parent !== 'main') {
+          return;
+        }
+        if (data.details === ErrorDetails.BUFFER_APPEND_ERROR) {
+          this.resetLoadingState();
           return;
         }
         if (this.reduceLengthAndFlushBuffer(data)) {
@@ -934,8 +939,10 @@ export default class StreamController
 
     if (this.loadedmetadata || !BufferHelper.getBuffered(media).length) {
       // Resolve gaps using the main buffer, whose ranges are the intersections of the A/V sourcebuffers
-      const activeFrag = this.state !== State.IDLE ? this.fragCurrent : null;
-      gapController.poll(this.lastCurrentTime, activeFrag);
+      const state = this.state;
+      const activeFrag = state !== State.IDLE ? this.fragCurrent : null;
+      const levelDetails = this.getLevelDetails();
+      gapController.poll(this.lastCurrentTime, activeFrag, levelDetails, state);
     }
 
     this.lastCurrentTime = media.currentTime;
@@ -954,7 +961,7 @@ export default class StreamController
 
   private onBufferFlushed(
     event: Events.BUFFER_FLUSHED,
-    { type }: BufferFlushedData
+    { type }: BufferFlushedData,
   ) {
     if (
       type !== ElementaryStreamTypes.AUDIO ||
@@ -965,13 +972,17 @@ export default class StreamController
           ? this.videoBuffer
           : this.mediaBuffer) || this.media;
       this.afterBufferFlushed(mediaBuffer, type, PlaylistLevelType.MAIN);
+      this.tick();
     }
   }
 
   private onLevelsUpdated(
     event: Events.LEVELS_UPDATED,
-    data: LevelsUpdatedData
+    data: LevelsUpdatedData,
   ) {
+    if (this.level > -1 && this.fragCurrent) {
+      this.level = this.fragCurrent.level;
+    }
     this.levels = data.levels;
   }
 
@@ -994,7 +1005,7 @@ export default class StreamController
     if (startPosition >= 0 && currentTime < startPosition) {
       if (media.seeking) {
         this.log(
-          `could not seek to ${startPosition}, already seeking at ${currentTime}`
+          `could not seek to ${startPosition}, already seeking at ${currentTime}`,
         );
         return;
       }
@@ -1011,7 +1022,7 @@ export default class StreamController
         this.startPosition = startPosition;
       }
       this.log(
-        `seek to target start position ${startPosition} from current time ${currentTime}`
+        `seek to target start position ${startPosition} from current time ${currentTime}`,
       );
       media.currentTime = startPosition;
     }
@@ -1086,7 +1097,7 @@ export default class StreamController
           level,
           initSegment.tracks,
           mapFragment,
-          chunkMeta
+          chunkMeta,
         );
         hls.trigger(Events.FRAG_PARSING_INIT_SEGMENT, {
           frag: mapFragment,
@@ -1105,8 +1116,11 @@ export default class StreamController
     }
 
     // Avoid buffering if backtracking this fragment
-    if (video && remuxResult.independent !== false) {
-      if (details) {
+    if (video && details && frag.sn !== 'initSegment') {
+      const prevFrag = details.fragments[frag.sn - 1 - details.startSN];
+      const isFirstFragment = frag.sn === details.startSN;
+      const isFirstInDiscontinuity = !prevFrag || frag.cc > prevFrag.cc;
+      if (remuxResult.independent !== false) {
         const { startPTS, endPTS, startDTS, endDTS } = video;
         if (part) {
           part.elementaryStreams[video.type] = {
@@ -1116,7 +1130,12 @@ export default class StreamController
             endDTS,
           };
         } else {
-          if (video.firstKeyFrame && video.independent && chunkMeta.id === 1) {
+          if (
+            video.firstKeyFrame &&
+            video.independent &&
+            chunkMeta.id === 1 &&
+            !isFirstInDiscontinuity
+          ) {
             this.couldBacktrack = true;
           }
           if (video.dropped && video.independent) {
@@ -1129,9 +1148,16 @@ export default class StreamController
             const startTime = video.firstKeyFramePTS
               ? video.firstKeyFramePTS
               : startPTS;
-            if (targetBufferTime < startTime - this.config.maxBufferHole) {
+            if (
+              !isFirstFragment &&
+              targetBufferTime < startTime - this.config.maxBufferHole &&
+              !isFirstInDiscontinuity
+            ) {
               this.backtrack(frag);
               return;
+            } else if (isFirstInDiscontinuity) {
+              // Mark segment with a gap to avoid loop loading
+              frag.gap = true;
             }
             // Set video stream start to fragment start so that truncated samples do not distort the timeline, and mark it partial
             frag.setElementaryStreamInfo(
@@ -1140,8 +1166,11 @@ export default class StreamController
               endPTS,
               frag.start,
               endDTS,
-              true
+              true,
             );
+          } else if (isFirstFragment && startPTS > MAX_START_GAP_JUMP) {
+            // Mark segment with a gap to skip large start gap
+            frag.gap = true;
           }
         }
         frag.setElementaryStreamInfo(
@@ -1149,16 +1178,25 @@ export default class StreamController
           startPTS,
           endPTS,
           startDTS,
-          endDTS
+          endDTS,
         );
         if (this.backtrackFragment) {
           this.backtrackFragment = frag;
         }
-        this.bufferFragmentData(video, frag, part, chunkMeta);
+        this.bufferFragmentData(
+          video,
+          frag,
+          part,
+          chunkMeta,
+          isFirstFragment || isFirstInDiscontinuity,
+        );
+      } else if (isFirstFragment || isFirstInDiscontinuity) {
+        // Mark segment with a gap to avoid loop loading
+        frag.gap = true;
+      } else {
+        this.backtrack(frag);
+        return;
       }
-    } else if (remuxResult.independent === false) {
-      this.backtrack(frag);
-      return;
     }
 
     if (audio) {
@@ -1176,7 +1214,7 @@ export default class StreamController
         startPTS,
         endPTS,
         startDTS,
-        endDTS
+        endDTS,
       );
       this.bufferFragmentData(audio, frag, part, chunkMeta);
     }
@@ -1205,7 +1243,7 @@ export default class StreamController
     currentLevel: Level,
     tracks: TrackSet,
     frag: Fragment,
-    chunkMeta: ChunkMetadata
+    chunkMeta: ChunkMetadata,
   ) {
     if (this.state !== State.PARSING) {
       return;
@@ -1238,14 +1276,19 @@ export default class StreamController
         }
       }
       // HE-AAC is broken on Android, always signal audio codec as AAC even if variant manifest states otherwise
-      if (ua.indexOf('android') !== -1 && audio.container !== 'audio/mpeg') {
+      if (
+        audioCodec &&
+        audioCodec.indexOf('mp4a.40.5') !== -1 &&
+        ua.indexOf('android') !== -1 &&
+        audio.container !== 'audio/mpeg'
+      ) {
         // Exclude mpeg audio
         audioCodec = 'mp4a.40.2';
         this.log(`Android: force audio codec to ${audioCodec}`);
       }
       if (currentLevel.audioCodec && currentLevel.audioCodec !== audioCodec) {
         this.log(
-          `Swapping manifest audio codec "${currentLevel.audioCodec}" for "${audioCodec}"`
+          `Swapping manifest audio codec "${currentLevel.audioCodec}" for "${audioCodec}"`,
         );
       }
       audio.levelCodec = audioCodec;
@@ -1255,7 +1298,7 @@ export default class StreamController
           audio.container
         }, codecs[selected/level/parsed]=[${audioCodec || ''}/${
           currentLevel.audioCodec || ''
-        }/${audio.codec}]`
+        }/${audio.codec}]`,
       );
     }
     if (video) {
@@ -1266,16 +1309,12 @@ export default class StreamController
           video.container
         }, codecs[level/parsed]=[${currentLevel.videoCodec || ''}/${
           video.codec
-        }]`
+        }]`,
       );
     }
     if (audiovideo) {
       this.log(
-        `Init audiovideo buffer, container:${
-          audiovideo.container
-        }, codecs[level/parsed]=[${currentLevel.attrs.CODECS || ''}/${
-          audiovideo.codec
-        }]`
+        `Init audiovideo buffer, container:${audiovideo.container}, codecs[level/parsed]=[${currentLevel.codecs}/${audiovideo.codec}]`,
       );
     }
     this.hls.trigger(Events.BUFFER_CODECS, tracks);
@@ -1295,14 +1334,23 @@ export default class StreamController
       }
     });
     // trigger handler right now
-    this.tick();
+    this.tickImmediate();
   }
 
   public getMainFwdBufferInfo(): BufferInfo | null {
     return this.getFwdBufferInfo(
       this.mediaBuffer ? this.mediaBuffer : this.media,
-      PlaylistLevelType.MAIN
+      PlaylistLevelType.MAIN,
     );
+  }
+
+  public get maxBufferLength(): number {
+    const { levels, level } = this;
+    const levelInfo = levels?.[level];
+    if (!levelInfo) {
+      return this.config.maxBufferLength;
+    }
+    return this.getMaxBufferLength(levelInfo.maxBitrate);
   }
 
   private backtrack(frag: Fragment) {
@@ -1346,8 +1394,7 @@ export default class StreamController
         if (
           !fragPlaying ||
           fragPlayingCurrent.sn !== fragPlaying.sn ||
-          fragPlaying.level !== fragCurrentLevel ||
-          fragPlayingCurrent.urlId !== fragPlaying.urlId
+          fragPlaying.level !== fragCurrentLevel
         ) {
           this.fragPlaying = fragPlayingCurrent;
           this.hls.trigger(Events.FRAG_CHANGED, { frag: fragPlayingCurrent });

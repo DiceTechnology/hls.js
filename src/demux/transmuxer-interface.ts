@@ -12,17 +12,14 @@ import Transmuxer, {
 } from '../demux/transmuxer';
 import { logger } from '../utils/logger';
 import { ErrorTypes, ErrorDetails } from '../errors';
-import { getMediaSource } from '../utils/mediasource-helper';
 import { EventEmitter } from 'eventemitter3';
 import { Fragment, Part } from '../loader/fragment';
+import { getM2TSSupportedAudioTypes } from '../utils/codecs';
 import type { ChunkMetadata, TransmuxerResult } from '../types/transmuxer';
 import type Hls from '../hls';
 import type { HlsEventEmitter } from '../events';
 import type { PlaylistLevelType } from '../types/loader';
-import type { TypeSupported } from './tsdemuxer';
 import type { RationalTimestamp } from '../utils/timescale-conversion';
-
-const MediaSource = getMediaSource() || { isTypeSupported: () => false };
 
 export default class TransmuxerInterface {
   public error: Error | null = null;
@@ -42,7 +39,7 @@ export default class TransmuxerInterface {
     hls: Hls,
     id: PlaylistLevelType,
     onTransmuxComplete: (transmuxResult: TransmuxerResult) => void,
-    onFlush: (chunkMeta: ChunkMetadata) => void
+    onFlush: (chunkMeta: ChunkMetadata) => void,
   ) {
     const config = hls.config;
     this.hls = hls;
@@ -66,11 +63,10 @@ export default class TransmuxerInterface {
     this.observer.on(Events.FRAG_DECRYPTED, forwardMessage);
     this.observer.on(Events.ERROR, forwardMessage);
 
-    const typeSupported: TypeSupported = {
-      mp4: MediaSource.isTypeSupported('video/mp4'),
-      mpeg: MediaSource.isTypeSupported('audio/mpeg'),
-      mp3: MediaSource.isTypeSupported('audio/mp4; codecs="mp3"'),
-    };
+    const m2tsTypeSupported = getM2TSSupportedAudioTypes(
+      config.preferManagedMediaSource,
+    );
+
     // navigator.vendor is not always available in Web Worker
     // refer to https://developer.mozilla.org/en-US/docs/Web/API/WorkerGlobalScope/navigator
     const vendor = navigator.vendor;
@@ -90,7 +86,7 @@ export default class TransmuxerInterface {
           worker.addEventListener('message', this.onwmsg as any);
           worker.onerror = (event) => {
             const error = new Error(
-              `${event.message}  (${event.filename}:${event.lineno})`
+              `${event.message}  (${event.filename}:${event.lineno})`,
             );
             config.enableWorker = false;
             logger.warn(`Error in "${id}" Web Worker, fallback to inline`);
@@ -104,7 +100,7 @@ export default class TransmuxerInterface {
           };
           worker.postMessage({
             cmd: 'init',
-            typeSupported: typeSupported,
+            typeSupported: m2tsTypeSupported,
             vendor: vendor,
             id: id,
             config: JSON.stringify(config),
@@ -112,16 +108,16 @@ export default class TransmuxerInterface {
         } catch (err) {
           logger.warn(
             `Error setting up "${id}" Web Worker, fallback to inline`,
-            err
+            err,
           );
           this.resetWorker();
           this.error = null;
           this.transmuxer = new Transmuxer(
             this.observer,
-            typeSupported,
+            m2tsTypeSupported,
             config,
             vendor,
-            id
+            id,
           );
         }
         return;
@@ -130,10 +126,10 @@ export default class TransmuxerInterface {
 
     this.transmuxer = new Transmuxer(
       this.observer,
-      typeSupported,
+      m2tsTypeSupported,
       config,
       vendor,
-      id
+      id,
     );
   }
 
@@ -183,7 +179,7 @@ export default class TransmuxerInterface {
     duration: number,
     accurateTimeOffset: boolean,
     chunkMeta: ChunkMetadata,
-    defaultInitPTS?: RationalTimestamp
+    defaultInitPTS?: RationalTimestamp,
   ): void {
     chunkMeta.transmuxing.start = self.performance.now();
     const { transmuxer } = this;
@@ -221,7 +217,7 @@ export default class TransmuxerInterface {
       accurateTimeOffset,
       trackSwitch,
       timeOffset,
-      initSegmentChange
+      initSegmentChange,
     );
     if (!contiguous || discontinuity || initSegmentChange) {
       logger.log(`[transmuxer-interface, ${frag.type}]: Starting new transmux session for sn: ${chunkMeta.sn} p: ${chunkMeta.part} level: ${chunkMeta.level} id: ${chunkMeta.id}
@@ -236,7 +232,7 @@ export default class TransmuxerInterface {
         videoCodec,
         initSegmentData,
         duration,
-        defaultInitPTS
+        defaultInitPTS,
       );
       this.configureTransmuxer(config);
     }
@@ -255,14 +251,14 @@ export default class TransmuxerInterface {
           chunkMeta,
           state,
         },
-        data instanceof ArrayBuffer ? [data] : []
+        data instanceof ArrayBuffer ? [data] : [],
       );
     } else if (transmuxer) {
       const transmuxResult = transmuxer.push(
         data,
         decryptdata,
         chunkMeta,
-        state
+        state,
       );
       if (isPromise(transmuxResult)) {
         transmuxer.async = true;
@@ -274,7 +270,7 @@ export default class TransmuxerInterface {
             this.transmuxerError(
               error,
               chunkMeta,
-              'transmuxer-interface push error'
+              'transmuxer-interface push error',
             );
           });
       } else {
@@ -308,13 +304,13 @@ export default class TransmuxerInterface {
             this.transmuxerError(
               error,
               chunkMeta,
-              'transmuxer-interface flush error'
+              'transmuxer-interface flush error',
             );
           });
       } else {
         this.handleFlushResult(
           transmuxResult as Array<TransmuxerResult>,
-          chunkMeta
+          chunkMeta,
         );
       }
     }
@@ -323,7 +319,7 @@ export default class TransmuxerInterface {
   private transmuxerError(
     error: Error,
     chunkMeta: ChunkMetadata,
-    reason: string
+    reason: string,
   ) {
     if (!this.hls) {
       return;
@@ -342,7 +338,7 @@ export default class TransmuxerInterface {
 
   private handleFlushResult(
     results: Array<TransmuxerResult>,
-    chunkMeta: ChunkMetadata
+    chunkMeta: ChunkMetadata,
   ) {
     results.forEach((result) => {
       this.handleTransmuxComplete(result);

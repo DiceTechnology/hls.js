@@ -7,29 +7,44 @@ import BufferController from './controller/buffer-controller';
 import { TimelineController } from './controller/timeline-controller';
 import CapLevelController from './controller/cap-level-controller';
 import FPSController from './controller/fps-controller';
-import EMEController from './controller/eme-controller';
+import EMEController, {
+  MediaKeySessionContext,
+} from './controller/eme-controller';
 import CMCDController from './controller/cmcd-controller';
+import ContentSteeringController from './controller/content-steering-controller';
+import ErrorController from './controller/error-controller';
 import XhrLoader from './utils/xhr-loader';
 import FetchLoader, { fetchSupported } from './utils/fetch-loader';
 import Cues from './utils/cues';
 import { requestMediaKeySystemAccess } from './utils/mediakeys-helper';
 import { ILogger, logger } from './utils/logger';
 
+import type Hls from './hls';
 import type { CuesInterface } from './utils/cues';
-import type { MediaKeyFunc } from './utils/mediakeys-helper';
+import type { MediaKeyFunc, KeySystems } from './utils/mediakeys-helper';
 import type {
   FragmentLoaderContext,
   Loader,
   LoaderContext,
+  LoaderResponse,
   PlaylistLoaderContext,
 } from './types/loader';
+import type {
+  AudioSelectionOption,
+  SubtitleSelectionOption,
+  VideoSelectionOption,
+} from './types/media-playlist';
 
 export type ABRControllerConfig = {
   abrEwmaFastLive: number;
   abrEwmaSlowLive: number;
   abrEwmaFastVoD: number;
   abrEwmaSlowVoD: number;
+  /**
+   * Default bandwidth estimate in bits/s prior to collecting fragment bandwidth samples
+   */
   abrEwmaDefaultEstimate: number;
+  abrEwmaDefaultEstimateMax: number;
   abrBandWidthFactor: number;
   abrBandWidthUpFactor: number;
   abrMaxWithRealBitrate: boolean;
@@ -40,7 +55,11 @@ export type ABRControllerConfig = {
 export type BufferControllerConfig = {
   appendErrorMaxRetry: number;
   backBufferLength: number;
+  frontBufferFlushThreshold: number;
   liveDurationInfinity: boolean;
+  /**
+   * @deprecated use backBufferLength
+   */
   liveBackBufferLength: number | null;
 };
 
@@ -52,18 +71,55 @@ export type CMCDControllerConfig = {
   sessionId?: string;
   contentId?: string;
   useHeaders?: boolean;
+  includeKeys?: string[];
 };
 
 export type DRMSystemOptions = {
   audioRobustness?: string;
   videoRobustness?: string;
+  audioEncryptionScheme?: string | null;
+  videoEncryptionScheme?: string | null;
+  persistentState?: MediaKeysRequirement;
+  distinctiveIdentifier?: MediaKeysRequirement;
+  sessionTypes?: string[];
+  sessionType?: string;
 };
 
+export type DRMSystemConfiguration = {
+  licenseUrl: string;
+  serverCertificateUrl?: string;
+  generateRequest?: (
+    this: Hls,
+    initDataType: string,
+    initData: ArrayBuffer | null,
+    keyContext: MediaKeySessionContext,
+  ) =>
+    | { initDataType: string; initData: ArrayBuffer | null }
+    | undefined
+    | never;
+};
+
+export type DRMSystemsConfiguration = Partial<
+  Record<KeySystems, DRMSystemConfiguration>
+>;
+
 export type EMEControllerConfig = {
-  licenseXhrSetup?: (xhr: XMLHttpRequest, url: string) => void;
-  licenseResponseCallback?: (xhr: XMLHttpRequest, url: string) => ArrayBuffer;
+  licenseXhrSetup?: (
+    this: Hls,
+    xhr: XMLHttpRequest,
+    url: string,
+    keyContext: MediaKeySessionContext,
+    licenseChallenge: Uint8Array,
+  ) => void | Uint8Array | Promise<Uint8Array | void>;
+  licenseResponseCallback?: (
+    this: Hls,
+    xhr: XMLHttpRequest,
+    url: string,
+    keyContext: MediaKeySessionContext,
+  ) => ArrayBuffer;
   emeEnabled: boolean;
   widevineLicenseUrl?: string;
+  drmSystems: DRMSystemsConfiguration;
   drmSystemOptions: DRMSystemOptions;
   requestMediaKeySystemAccessFunc: MediaKeyFunc | null;
 };
@@ -72,9 +128,10 @@ export interface FragmentLoaderConstructor {
   new (confg: HlsConfig): Loader<FragmentLoaderContext>;
 }
 
+/**
+ * @deprecated use fragLoadPolicy.default
+ */
 export type FragmentLoaderConfig = {
-  fLoader?: FragmentLoaderConstructor;
-
   fragLoadingTimeOut: number;
   fragLoadingMaxRetry: number;
   fragLoadingRetryDelay: number;
@@ -100,9 +157,10 @@ export interface PlaylistLoaderConstructor {
   new (confg: HlsConfig): Loader<PlaylistLoaderContext>;
 }
 
+/**
+ * @deprecated use manifestLoadPolicy.default and playlistLoadPolicy.default
+ */
 export type PlaylistLoaderConfig = {
-  pLoader?: PlaylistLoaderConstructor;
-
   manifestLoadingTimeOut: number;
   manifestLoadingMaxRetry: number;
   manifestLoadingRetryDelay: number;
@@ -112,6 +170,40 @@ export type PlaylistLoaderConfig = {
   levelLoadingMaxRetry: number;
   levelLoadingRetryDelay: number;
   levelLoadingMaxRetryTimeout: number;
+};
+
+export type HlsLoadPolicies = {
+  fragLoadPolicy: LoadPolicy;
+  keyLoadPolicy: LoadPolicy;
+  certLoadPolicy: LoadPolicy;
+  playlistLoadPolicy: LoadPolicy;
+  manifestLoadPolicy: LoadPolicy;
+  steeringManifestLoadPolicy: LoadPolicy;
+};
+
+export type LoadPolicy = {
+  default: LoaderConfig;
+};
+
+export type LoaderConfig = {
+  maxTimeToFirstByteMs: number; // Max time to first byte
+  maxLoadTimeMs: number; // Max time for load completion
+  timeoutRetry: RetryConfig | null;
+  errorRetry: RetryConfig | null;
+};
+
+export type RetryConfig = {
+  maxNumRetry: number; // Maximum number of retries
+  retryDelayMs: number; // Retry delay = 2^retryCount * retryDelayMs (exponential) or retryCount * retryDelayMs (linear)
+  maxRetryDelayMs: number; // Maximum delay between retries
+  backoff?: 'exponential' | 'linear'; // used to determine retry backoff duration (see retryDelayMs)
+  shouldRetry?: (
+    retryConfig: RetryConfig | null | undefined,
+    retryCount: number,
+    isTimeout: boolean,
+    loaderResponse: LoaderResponse | undefined,
+    retry: boolean,
+  ) => boolean;
 };
 
 export type StreamControllerConfig = {
@@ -129,6 +221,12 @@ export type StreamControllerConfig = {
   maxMaxBufferLength: number;
   startFragPrefetch: boolean;
   testBandwidth: boolean;
+};
+
+export type SelectionPreferences = {
+  videoPreference?: VideoSelectionOption;
+  audioPreference?: AudioSelectionOption;
+  subtitlePreference?: SubtitleSelectionOption;
 };
 
 export type LatencyControllerConfig = {
@@ -168,12 +266,16 @@ export type TSDemuxerConfig = {
 export type HlsConfig = {
   debug: boolean | ILogger;
   enableWorker: boolean;
+  workerPath: null | string;
   enableSoftwareAES: boolean;
   minAutoBitrate: number;
   ignoreDevicePixelRatio: boolean;
+  preferManagedMediaSource: boolean;
   loader: { new (confg: HlsConfig): Loader<LoaderContext> };
+  fLoader?: FragmentLoaderConstructor;
+  pLoader?: PlaylistLoaderConstructor;
   fetchSetup?: (context: LoaderContext, initParams: any) => Request;
-  xhrSetup?: (xhr: XMLHttpRequest, url: string) => void;
+  xhrSetup?: (xhr: XMLHttpRequest, url: string) => Promise<void> | void;
 
   // Alt Audio
   audioStreamController?: typeof AudioStreamController;
@@ -187,10 +289,16 @@ export type HlsConfig = {
   // CMCD
   cmcd?: CMCDControllerConfig;
   cmcdController?: typeof CMCDController;
+  // Content Steering
+  contentSteeringController?: typeof ContentSteeringController;
+
+  // MediaCapabilies API for level, track, and switch filtering
+  useMediaCapabilities: boolean;
 
   abrController: typeof AbrController;
   bufferController: typeof BufferController;
   capLevelController: typeof CapLevelController;
+  errorController: typeof ErrorController;
   fpsController: typeof FPSController;
   progressive: boolean;
   lowLatencyMode: boolean;
@@ -199,19 +307,31 @@ export type HlsConfig = {
   CapLevelControllerConfig &
   EMEControllerConfig &
   FPSControllerConfig &
-  FragmentLoaderConfig &
   LevelControllerConfig &
   MP4RemuxerConfig &
-  PlaylistLoaderConfig &
   StreamControllerConfig &
+  SelectionPreferences &
   LatencyControllerConfig &
   MetadataControllerConfig &
   TimelineControllerConfig &
-  TSDemuxerConfig;
+  TSDemuxerConfig &
+  HlsLoadPolicies &
+  FragmentLoaderConfig &
+  PlaylistLoaderConfig;
 
-// If possible, keep hlsDefaultConfig shallow
-// It is cloned whenever a new Hls instance is created, by keeping the config
-// shallow the properties are cloned, and we don't end up manipulating the default
+const defaultLoadPolicy: LoaderConfig = {
+  maxTimeToFirstByteMs: 8000,
+  maxLoadTimeMs: 20000,
+  timeoutRetry: null,
+  errorRetry: null,
+};
+
+/**
+ * @ignore
+ * If possible, keep hlsDefaultConfig shallow
+ * It is cloned whenever a new Hls instance is created, by keeping the config
+ * shallow the properties are cloned, and we don't end up manipulating the default
+ */
 export const hlsDefaultConfig: HlsConfig = {
   autoStartLoad: true, // used by stream-controller
   startPosition: -1, // used by stream-controller
@@ -220,9 +340,11 @@ export const hlsDefaultConfig: HlsConfig = {
   capLevelOnFPSDrop: false, // used by fps-controller
   capLevelToPlayerSize: false, // used by cap-level-controller
   ignoreDevicePixelRatio: false, // used by cap-level-controller
+  preferManagedMediaSource: true,
   initialLiveManifestSize: 1, // used by stream-controller
   maxBufferLength: 30, // used by stream-controller
   backBufferLength: Infinity, // used by buffer-controller
+  frontBufferFlushThreshold: Infinity,
   maxBufferSize: 60 * 1000 * 1000, // used by stream-controller
   maxBufferHole: 0.1, // used by stream-controller
   highBufferWatchdogPeriod: 2, // used by stream-controller
@@ -235,23 +357,15 @@ export const hlsDefaultConfig: HlsConfig = {
   liveMaxLatencyDuration: undefined, // used by latency-controller
   maxLiveSyncPlaybackRate: 1, // used by latency-controller
   liveDurationInfinity: false, // used by buffer-controller
+  /**
+   * @deprecated use backBufferLength
+   */
   liveBackBufferLength: null, // used by buffer-controller
   maxMaxBufferLength: 600, // used by stream-controller
-  enableWorker: true, // used by demuxer
+  enableWorker: true, // used by transmuxer
+  workerPath: null, // used by transmuxer
   enableSoftwareAES: true, // used by decrypter
-  manifestLoadingTimeOut: 10000, // used by playlist-loader
-  manifestLoadingMaxRetry: 1, // used by playlist-loader
-  manifestLoadingRetryDelay: 1000, // used by playlist-loader
-  manifestLoadingMaxRetryTimeout: 64000, // used by playlist-loader
   startLevel: undefined, // used by level-controller
-  levelLoadingTimeOut: 10000, // used by playlist-loader
-  levelLoadingMaxRetry: 4, // used by playlist-loader
-  levelLoadingRetryDelay: 1000, // used by playlist-loader
-  levelLoadingMaxRetryTimeout: 64000, // used by playlist-loader
-  fragLoadingTimeOut: 20000, // used by fragment-loader
-  fragLoadingMaxRetry: 6, // used by fragment-loader
-  fragLoadingRetryDelay: 1000, // used by fragment-loader
-  fragLoadingMaxRetryTimeout: 64000, // used by fragment-loader
   startFragPrefetch: false, // used by stream-controller
   fpsDroppedMonitoringPeriod: 5000, // used by fps-controller
   fpsDroppedMonitoringThreshold: 0.2, // used by fps-controller
@@ -266,6 +380,7 @@ export const hlsDefaultConfig: HlsConfig = {
   abrController: AbrController,
   bufferController: BufferController,
   capLevelController: CapLevelController,
+  errorController: ErrorController,
   fpsController: FPSController,
   stretchShortVideoTrack: false, // used by mp4-remuxer
   maxAudioFramesDrift: 1, // used by mp4-remuxer
@@ -275,6 +390,7 @@ export const hlsDefaultConfig: HlsConfig = {
   abrEwmaFastVoD: 3, // used by abr-controller
   abrEwmaSlowVoD: 9, // used by abr-controller
   abrEwmaDefaultEstimate: 5e5, // 500 kbps  // used by abr-controller
+  abrEwmaDefaultEstimateMax: 5e6, // 5 mbps
   abrBandWidthFactor: 0.95, // used by abr-controller
   abrBandWidthUpFactor: 0.7, // used by abr-controller
   abrMaxWithRealBitrate: false, // used by abr-controller
@@ -283,8 +399,11 @@ export const hlsDefaultConfig: HlsConfig = {
   minAutoBitrate: 0, // used by hls
   emeEnabled: false, // used by eme-controller
   widevineLicenseUrl: undefined, // used by eme-controller
+  drmSystems: {}, // used by eme-controller
   drmSystemOptions: {}, // used by eme-controller
-  requestMediaKeySystemAccessFunc: requestMediaKeySystemAccess, // used by eme-controller
+  requestMediaKeySystemAccessFunc: __USE_EME_DRM__
+    ? requestMediaKeySystemAccess
+    : null, // used by eme-controller
   testBandwidth: true,
   progressive: false,
   lowLatencyMode: true,
@@ -292,6 +411,110 @@ export const hlsDefaultConfig: HlsConfig = {
   enableDateRangeMetadataCues: true,
   enableEmsgMetadataCues: true,
   enableID3MetadataCues: true,
+  useMediaCapabilities: __USE_MEDIA_CAPABILITIES__,
+
+  certLoadPolicy: {
+    default: defaultLoadPolicy,
+  },
+  keyLoadPolicy: {
+    default: {
+      maxTimeToFirstByteMs: 8000,
+      maxLoadTimeMs: 20000,
+      timeoutRetry: {
+        maxNumRetry: 1,
+        retryDelayMs: 1000,
+        maxRetryDelayMs: 20000,
+        backoff: 'linear',
+      },
+      errorRetry: {
+        maxNumRetry: 8,
+        retryDelayMs: 1000,
+        maxRetryDelayMs: 20000,
+        backoff: 'linear',
+      },
+    },
+  },
+  manifestLoadPolicy: {
+    default: {
+      maxTimeToFirstByteMs: Infinity,
+      maxLoadTimeMs: 20000,
+      timeoutRetry: {
+        maxNumRetry: 2,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+      errorRetry: {
+        maxNumRetry: 1,
+        retryDelayMs: 1000,
+        maxRetryDelayMs: 8000,
+      },
+    },
+  },
+  playlistLoadPolicy: {
+    default: {
+      maxTimeToFirstByteMs: 10000,
+      maxLoadTimeMs: 20000,
+      timeoutRetry: {
+        maxNumRetry: 2,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+      errorRetry: {
+        maxNumRetry: 2,
+        retryDelayMs: 1000,
+        maxRetryDelayMs: 8000,
+      },
+    },
+  },
+  fragLoadPolicy: {
+    default: {
+      maxTimeToFirstByteMs: 10000,
+      maxLoadTimeMs: 120000,
+      timeoutRetry: {
+        maxNumRetry: 4,
+        retryDelayMs: 0,
+        maxRetryDelayMs: 0,
+      },
+      errorRetry: {
+        maxNumRetry: 6,
+        retryDelayMs: 1000,
+        maxRetryDelayMs: 8000,
+      },
+    },
+  },
+  steeringManifestLoadPolicy: {
+    default: __USE_CONTENT_STEERING__
+      ? {
+          maxTimeToFirstByteMs: 10000,
+          maxLoadTimeMs: 20000,
+          timeoutRetry: {
+            maxNumRetry: 2,
+            retryDelayMs: 0,
+            maxRetryDelayMs: 0,
+          },
+          errorRetry: {
+            maxNumRetry: 1,
+            retryDelayMs: 1000,
+            maxRetryDelayMs: 8000,
+          },
+        }
+      : defaultLoadPolicy,
+  },
+
+  // These default settings are deprecated in favor of the above policies
+  // and are maintained for backwards compatibility
+  manifestLoadingTimeOut: 10000,
+  manifestLoadingMaxRetry: 1,
+  manifestLoadingRetryDelay: 1000,
+  manifestLoadingMaxRetryTimeout: 64000,
+  levelLoadingTimeOut: 10000,
+  levelLoadingMaxRetry: 4,
+  levelLoadingRetryDelay: 1000,
+  levelLoadingMaxRetryTimeout: 64000,
+  fragLoadingTimeOut: 20000,
+  fragLoadingMaxRetry: 6,
+  fragLoadingRetryDelay: 1000,
+  fragLoadingMaxRetryTimeout: 64000,
 
   // Dynamic Modules
   ...timelineConfig(),
@@ -306,6 +529,9 @@ export const hlsDefaultConfig: HlsConfig = {
   audioTrackController: __USE_ALT_AUDIO__ ? AudioTrackController : undefined,
   emeController: __USE_EME_DRM__ ? EMEController : undefined,
   cmcdController: __USE_CMCD__ ? CMCDController : undefined,
+  contentSteeringController: __USE_CONTENT_STEERING__
+    ? ContentSteeringController
+    : undefined,
 };
 
 function timelineConfig(): TimelineControllerConfig {
@@ -326,9 +552,12 @@ function timelineConfig(): TimelineControllerConfig {
   };
 }
 
+/**
+ * @ignore
+ */
 export function mergeConfig(
   defaultConfig: HlsConfig,
-  userConfig: Partial<HlsConfig>
+  userConfig: Partial<HlsConfig>,
 ): HlsConfig {
   if (
     (userConfig.liveSyncDurationCount ||
@@ -336,7 +565,7 @@ export function mergeConfig(
     (userConfig.liveSyncDuration || userConfig.liveMaxLatencyDuration)
   ) {
     throw new Error(
-      "Illegal hls.js config: don't mix up liveSyncDurationCount/liveMaxLatencyDurationCount and liveSyncDuration/liveMaxLatencyDuration"
+      "Illegal hls.js config: don't mix up liveSyncDurationCount/liveMaxLatencyDurationCount and liveSyncDuration/liveMaxLatencyDuration",
     );
   }
 
@@ -347,7 +576,7 @@ export function mergeConfig(
         userConfig.liveSyncDurationCount)
   ) {
     throw new Error(
-      'Illegal hls.js config: "liveMaxLatencyDurationCount" must be greater than "liveSyncDurationCount"'
+      'Illegal hls.js config: "liveMaxLatencyDurationCount" must be greater than "liveSyncDurationCount"',
     );
   }
 
@@ -357,19 +586,90 @@ export function mergeConfig(
       userConfig.liveMaxLatencyDuration <= userConfig.liveSyncDuration)
   ) {
     throw new Error(
-      'Illegal hls.js config: "liveMaxLatencyDuration" must be greater than "liveSyncDuration"'
+      'Illegal hls.js config: "liveMaxLatencyDuration" must be greater than "liveSyncDuration"',
     );
   }
 
-  return Object.assign({}, defaultConfig, userConfig);
+  const defaultsCopy = deepCpy(defaultConfig);
+
+  // Backwards compatibility with deprecated config values
+  const deprecatedSettingTypes = ['manifest', 'level', 'frag'];
+  const deprecatedSettings = [
+    'TimeOut',
+    'MaxRetry',
+    'RetryDelay',
+    'MaxRetryTimeout',
+  ];
+  deprecatedSettingTypes.forEach((type) => {
+    const policyName = `${type === 'level' ? 'playlist' : type}LoadPolicy`;
+    const policyNotSet = userConfig[policyName] === undefined;
+    const report: string[] = [];
+    deprecatedSettings.forEach((setting) => {
+      const deprecatedSetting = `${type}Loading${setting}`;
+      const value = userConfig[deprecatedSetting];
+      if (value !== undefined && policyNotSet) {
+        report.push(deprecatedSetting);
+        const settings: LoaderConfig = defaultsCopy[policyName].default;
+        userConfig[policyName] = { default: settings };
+        switch (setting) {
+          case 'TimeOut':
+            settings.maxLoadTimeMs = value;
+            settings.maxTimeToFirstByteMs = value;
+            break;
+          case 'MaxRetry':
+            settings.errorRetry!.maxNumRetry = value;
+            settings.timeoutRetry!.maxNumRetry = value;
+            break;
+          case 'RetryDelay':
+            settings.errorRetry!.retryDelayMs = value;
+            settings.timeoutRetry!.retryDelayMs = value;
+            break;
+          case 'MaxRetryTimeout':
+            settings.errorRetry!.maxRetryDelayMs = value;
+            settings.timeoutRetry!.maxRetryDelayMs = value;
+            break;
+        }
+      }
+    });
+    if (report.length) {
+      logger.warn(
+        `hls.js config: "${report.join(
+          '", "',
+        )}" setting(s) are deprecated, use "${policyName}": ${JSON.stringify(
+          userConfig[policyName],
+        )}`,
+      );
+    }
+  });
+
+  return {
+    ...defaultsCopy,
+    ...userConfig,
+  };
 }
 
+function deepCpy(obj: any): any {
+  if (obj && typeof obj === 'object') {
+    if (Array.isArray(obj)) {
+      return obj.map(deepCpy);
+    }
+    return Object.keys(obj).reduce((result, key) => {
+      result[key] = deepCpy(obj[key]);
+      return result;
+    }, {});
+  }
+  return obj;
+}
+
+/**
+ * @ignore
+ */
 export function enableStreamingMode(config) {
   const currentLoader = config.loader;
   if (currentLoader !== FetchLoader && currentLoader !== XhrLoader) {
     // If a developer has configured their own loader, respect that choice
     logger.log(
-      '[config]: Custom loader detected, cannot enable progressive streaming'
+      '[config]: Custom loader detected, cannot enable progressive streaming',
     );
     config.progressive = false;
   } else {

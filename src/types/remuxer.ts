@@ -3,30 +3,33 @@ import {
   DemuxedAudioTrack,
   DemuxedMetadataTrack,
   DemuxedUserdataTrack,
-  DemuxedVideoTrack,
+  DemuxedVideoTrackBase,
   MetadataSample,
   UserdataSample,
 } from './demuxer';
 import type { SourceBufferName } from './buffer';
 import type { PlaylistLevelType } from './loader';
+import type { DecryptData } from '../loader/level-key';
+import type { RationalTimestamp } from '../utils/timescale-conversion';
 
 export interface Remuxer {
   remux(
     audioTrack: DemuxedAudioTrack,
-    videoTrack: DemuxedVideoTrack,
+    videoTrack: DemuxedVideoTrackBase,
     id3Track: DemuxedMetadataTrack,
     textTrack: DemuxedUserdataTrack,
     timeOffset: number,
     accurateTimeOffset: boolean,
     flush: boolean,
-    playlistType: PlaylistLevelType
+    playlistType: PlaylistLevelType,
   ): RemuxerResult;
   resetInitSegment(
     initSegment: Uint8Array | undefined,
     audioCodec: string | undefined,
-    videoCodec: string | undefined
+    videoCodec: string | undefined,
+    decryptdata: DecryptData | null,
   ): void;
-  resetTimeStamp(defaultInitPTS): void;
+  resetTimeStamp(defaultInitPTS: RationalTimestamp | null): void;
   resetNextTimestamp(): void;
   destroy(): void;
 }

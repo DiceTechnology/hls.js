@@ -5,6 +5,7 @@ import {
   LoaderStats,
   LoaderConfiguration,
   LoaderOnProgress,
+  LoaderResponse,
 } from '../types/loader';
 import { LoadStats } from '../loader/load-stats';
 import ChunkCache from '../demux/chunk-cache';
@@ -27,13 +28,15 @@ export function fetchSupported() {
   return false;
 }
 
+const BYTERANGE = /(\d+)-(\d+)\/(\d+)/;
+
 class FetchLoader implements Loader<LoaderContext> {
   private fetchSetup: Function;
   private requestTimeout?: number;
-  private request!: Request;
-  private response!: Response;
+  private request: Request | null = null;
+  private response: Response | null = null;
   private controller: AbortController;
-  public context!: LoaderContext;
+  public context: LoaderContext | null = null;
   private config: LoaderConfiguration | null = null;
   private callbacks: LoaderCallbacks<LoaderContext> | null = null;
   public stats: LoaderStats;
@@ -46,13 +49,20 @@ class FetchLoader implements Loader<LoaderContext> {
   }
 
   destroy(): void {
-    this.loader = this.callbacks = null;
+    this.loader =
+      this.callbacks =
+      this.context =
+      this.config =
+      this.request =
+        null;
     this.abortInternal();
+    this.response = null;
+    // @ts-ignore
+    this.fetchSetup = this.controller = this.stats = null;
   }
 
   abortInternal(): void {
-    const response = this.response;
-    if (!response || !response.ok) {
+    if (this.controller && !this.stats.loading.end) {
       this.stats.aborted = true;
       this.controller.abort();
     }
@@ -61,14 +71,18 @@ class FetchLoader implements Loader<LoaderContext> {
   abort(): void {
     this.abortInternal();
     if (this.callbacks?.onAbort) {
-      this.callbacks.onAbort(this.stats, this.context, this.response);
+      this.callbacks.onAbort(
+        this.stats,
+        this.context as LoaderContext,
+        this.response,
+      );
     }
   }
 
   load(
     context: LoaderContext,
     config: LoaderConfiguration,
-    callbacks: LoaderCallbacks<LoaderContext>
+    callbacks: LoaderCallbacks<LoaderContext>,
   ): void {
     const stats = this.stats;
     if (stats.loading.start) {
@@ -81,35 +95,50 @@ class FetchLoader implements Loader<LoaderContext> {
       callbacks.onProgress;
     const isArrayBuffer = context.responseType === 'arraybuffer';
     const LENGTH = isArrayBuffer ? 'byteLength' : 'length';
+    const { maxTimeToFirstByteMs, maxLoadTimeMs } = config.loadPolicy;
 
     this.context = context;
     this.config = config;
     this.callbacks = callbacks;
     this.request = this.fetchSetup(context, initParams);
     self.clearTimeout(this.requestTimeout);
+    config.timeout =
+      maxTimeToFirstByteMs && Number.isFinite(maxTimeToFirstByteMs)
+        ? maxTimeToFirstByteMs
+        : maxLoadTimeMs;
     this.requestTimeout = self.setTimeout(() => {
       this.abortInternal();
       callbacks.onTimeout(stats, context, this.response);
     }, config.timeout);
 
     self
-      .fetch(this.request)
+      .fetch(this.request as Request)
       .then((response: Response): Promise<string | ArrayBuffer> => {
         this.response = this.loader = response;
+
+        const first = Math.max(self.performance.now(), stats.loading.start);
+
+        self.clearTimeout(this.requestTimeout);
+        config.timeout = maxLoadTimeMs;
+        this.requestTimeout = self.setTimeout(
+          () => {
+            this.abortInternal();
+            callbacks.onTimeout(stats, context, this.response);
+          },
+          maxLoadTimeMs - (first - stats.loading.start),
+        );
 
         if (!response.ok) {
           const { status, statusText } = response;
           throw new FetchError(
             statusText || 'fetch, bad network response',
             status,
-            response
+            response,
           );
         }
-        stats.loading.first = Math.max(
-          self.performance.now(),
-          stats.loading.start
-        );
-        stats.total = parseInt(response.headers.get('Content-Length') || '0');
+        stats.loading.first = first;
+
+        stats.total = getContentLength(response.headers) || stats.total;
 
         if (onProgress && Number.isFinite(config.highWaterMark)) {
           return this.loadProgressively(
@@ -117,27 +146,37 @@ class FetchLoader implements Loader<LoaderContext> {
             stats,
             context,
             config.highWaterMark,
-            onProgress
+            onProgress,
           );
         }
 
         if (isArrayBuffer) {
           return response.arrayBuffer();
         }
+        if (context.responseType === 'json') {
+          return response.json();
+        }
         return response.text();
       })
       .then((responseData: string | ArrayBuffer) => {
-        const { response } = this;
+        const response = this.response;
+        if (!response) {
+          throw new Error('loader destroyed');
+        }
         self.clearTimeout(this.requestTimeout);
         stats.loading.end = Math.max(
           self.performance.now(),
-          stats.loading.first
+          stats.loading.first,
         );
-        stats.loaded = stats.total = responseData[LENGTH];
+        const total = responseData[LENGTH];
+        if (total) {
+          stats.loaded = stats.total = total;
+        }
 
-        const loaderResponse = {
+        const loaderResponse: LoaderResponse = {
           url: response.url,
           data: responseData,
+          code: response.status,
         };
 
         if (onProgress && !Number.isFinite(config.highWaterMark)) {
@@ -158,7 +197,8 @@ class FetchLoader implements Loader<LoaderContext> {
         callbacks.onError(
           { code, text },
           context,
-          error ? error.details : null
+          error ? error.details : null,
+          stats,
         );
       });
   }
@@ -172,12 +212,16 @@ class FetchLoader implements Loader<LoaderContext> {
     return result;
   }
 
+  getResponseHeader(name: string): string | null {
+    return this.response ? this.response.headers.get(name) : null;
+  }
+
   private loadProgressively(
     response: Response,
     stats: LoaderStats,
     context: LoaderContext,
     highWaterMark: number = 0,
-    onProgress: LoaderOnProgress<LoaderContext>
+    onProgress: LoaderOnProgress<LoaderContext>,
   ): Promise<ArrayBuffer> {
     const chunkCache = new ChunkCache();
     const reader = (response.body as ReadableStream).getReader();
@@ -233,11 +277,32 @@ function getRequestParameters(context: LoaderContext, signal): any {
   if (context.rangeEnd) {
     initParams.headers.set(
       'Range',
-      'bytes=' + context.rangeStart + '-' + String(context.rangeEnd - 1)
+      'bytes=' + context.rangeStart + '-' + String(context.rangeEnd - 1),
     );
   }
 
   return initParams;
+}
+
+function getByteRangeLength(byteRangeHeader: string): number | undefined {
+  const result = BYTERANGE.exec(byteRangeHeader);
+  if (result) {
+    return parseInt(result[2]) - parseInt(result[1]) + 1;
+  }
+}
+
+function getContentLength(headers: Headers): number | undefined {
+  const contentRange = headers.get('Content-Range');
+  if (contentRange) {
+    const byteRangeLength = getByteRangeLength(contentRange);
+    if (Number.isFinite(byteRangeLength)) {
+      return byteRangeLength;
+    }
+  }
+  const contentLength = headers.get('Content-Length');
+  if (contentLength) {
+    return parseInt(contentLength);
+  }
 }
 
 function getRequest(context: LoaderContext, initParams: any): Request {

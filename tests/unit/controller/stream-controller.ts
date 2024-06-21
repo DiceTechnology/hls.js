@@ -11,52 +11,86 @@ import { mockFragments } from '../../mocks/data';
 import { Fragment } from '../../../src/loader/fragment';
 import { LevelDetails } from '../../../src/loader/level-details';
 import M3U8Parser from '../../../src/loader/m3u8-parser';
+import { LoadStats } from '../../../src/loader/load-stats';
 import { PlaylistLevelType } from '../../../src/types/loader';
 import { AttrList } from '../../../src/utils/attr-list';
 import { Level, LevelAttributes } from '../../../src/types/level';
+import type { ParsedMultivariantPlaylist } from '../../../src/loader/m3u8-parser';
 
-import * as sinon from 'sinon';
-import * as chai from 'chai';
-import * as sinonChai from 'sinon-chai';
+import sinon from 'sinon';
+import chai from 'chai';
+import sinonChai from 'sinon-chai';
 
 chai.use(sinonChai);
 const expect = chai.expect;
 
 describe('StreamController', function () {
+  let fake;
   let hls: Hls;
   let fragmentTracker: FragmentTracker;
   let streamController: StreamController;
   const attrs: LevelAttributes = new AttrList({});
 
   beforeEach(function () {
-    hls = new Hls({});
+    fake = sinon.useFakeXMLHttpRequest();
+    hls = new Hls({
+      // Enable debug to catch callback errors and enable logging in these tests:
+      // debug: true,
+      startFragPrefetch: true,
+      enableWorker: false,
+    });
     streamController = hls['streamController'];
     fragmentTracker = streamController['fragmentTracker'];
     streamController['startFragRequested'] = true;
   });
 
-  /**
-   * Assert: streamController should be started
-   * @param {StreamController} streamController
-   */
+  this.afterEach(function () {
+    fake.restore();
+    hls.destroy();
+  });
+
   const assertStreamControllerStarted = (streamController) => {
     expect(streamController.hasInterval()).to.be.true;
     expect(streamController.state).to.equal(
       State.IDLE,
-      "StreamController's state should not be STOPPED"
+      "StreamController's state should not be STOPPED",
     );
   };
 
-  /**
-   * Assert: streamController should be stopped
-   * @param {StreamController} streamController
-   */
   const assertStreamControllerStopped = (streamController) => {
     expect(streamController.hasInterval()).to.be.false;
     expect(streamController.state).to.equal(
       State.STOPPED,
-      "StreamController's state should be STOPPED"
+      "StreamController's state should be STOPPED",
     );
+  };
+
+  const loadManifest = (manifest: string): ParsedMultivariantPlaylist => {
+    const result = M3U8Parser.parseMasterPlaylist(
+      manifest,
+      'http://www.example.com',
+    );
+    const {
+      contentSteering,
+      levels,
+      sessionData,
+      sessionKeys,
+      startTimeOffset,
+      variableList,
+    } = result;
+    hls.trigger(Events.MANIFEST_LOADED, {
+      levels,
+      audioTracks: [],
+      contentSteering,
+      url: 'http://www.example.com',
+      stats: new LoadStats(),
+      networkDetails: {},
+      sessionData,
+      sessionKeys,
+      startTimeOffset,
+      variableList,
+    });
+    return result;
   };
 
   describe('StreamController', function () {
@@ -69,31 +103,82 @@ describe('StreamController', function () {
       assertStreamControllerStopped(streamController);
     });
 
-    it('should start without levels data', function () {
-      const manifest = `#EXTM3U
-  #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=836280,RESOLUTION=848x360,NAME="480"
-  http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core`;
-      const { levels: levelsParsed } = M3U8Parser.parseMasterPlaylist(
-        manifest,
-        'http://www.dailymotion.com'
-      );
-      // load levels data
-      const levels = levelsParsed.map((levelParsed) => new Level(levelParsed));
-      streamController['onManifestParsed'](Events.MANIFEST_PARSED, {
-        altAudio: false,
-        audio: false,
-        audioTracks: [],
-        firstLevel: 0,
-        // @ts-ignore
-        stats: undefined,
-        subtitleTracks: [],
-        video: false,
-        levels,
-      });
-      streamController.startLoad(1);
+    it('should start without level details', function () {
+      loadManifest(`#EXTM3U
+      #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=836280,RESOLUTION=848x360,NAME="480"
+      http://proxy-62.dailymotion.com/sec(3ae40f708f79ca9471f52b86da76a3a8)/video/107/282/158282701_mp4_h264_aac_hq.m3u8#cell=core`);
       assertStreamControllerStarted(streamController);
       streamController.stopLoad();
       assertStreamControllerStopped(streamController);
+    });
+
+    it('should use EXT-X-START from Multivariant Playlist when not overridden by startPosition', function () {
+      loadManifest(`#EXTM3U
+  #EXT-X-START:TIME-OFFSET=130.5
+  #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=836280,RESOLUTION=848x360,NAME="480"
+  http://www.example.com/media.m3u8`);
+      assertStreamControllerStarted(streamController);
+      // Trigger Level Loaded
+      const details = new LevelDetails('');
+      details.live = false;
+      details.totalduration = 200;
+      details.fragments.push({} as any);
+      hls.trigger(Events.LEVEL_LOADED, {
+        details,
+        id: 0,
+        level: 0,
+        networkDetails: {},
+        stats: new LoadStats(),
+        deliveryDirectives: null,
+      });
+      expect(streamController['startPosition']).to.equal(130.5);
+      expect(streamController['nextLoadPosition']).to.equal(130.5);
+      expect(streamController['lastCurrentTime']).to.equal(130.5);
+    });
+
+    it('should use EXT-X-START from Multivariant Playlist when not overridden by startPosition with live playlists', function () {
+      const result = loadManifest(`#EXTM3U
+  #EXT-X-START:TIME-OFFSET=-12.0
+  #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=836280,RESOLUTION=848x360,NAME="480"
+  http://www.example.com/media.m3u8`);
+      const {
+        contentSteering,
+        levels,
+        sessionData,
+        sessionKeys,
+        startTimeOffset,
+        variableList,
+      } = result;
+      hls.trigger(Events.MANIFEST_LOADED, {
+        levels,
+        audioTracks: [],
+        contentSteering,
+        url: 'http://www.example.com',
+        stats: new LoadStats(),
+        networkDetails: {},
+        sessionData,
+        sessionKeys,
+        startTimeOffset,
+        variableList,
+      });
+      assertStreamControllerStarted(streamController);
+
+      // Trigger Level Loaded
+      const details = new LevelDetails('');
+      details.live = true;
+      details.totalduration = 30;
+      details.fragments.push({ start: 0 } as any);
+      hls.trigger(Events.LEVEL_LOADED, {
+        details,
+        id: 0,
+        level: 0,
+        networkDetails: {},
+        stats: new LoadStats(),
+        deliveryDirectives: null,
+      });
+      expect(streamController['startPosition']).to.equal(18);
+      expect(streamController['nextLoadPosition']).to.equal(18);
+      expect(streamController['lastCurrentTime']).to.equal(18);
     });
   });
 
@@ -122,19 +207,19 @@ describe('StreamController', function () {
       levelDetails.targetduration = mockFragments[0].duration;
       levelDetails.totalduration = mockFragments.reduce(
         (sum, frag) => sum + frag.duration,
-        0
+        0,
       );
     });
 
     it('PTS search choosing wrong fragment (3 instead of 2) after level loaded', function () {
       const foundFragment = streamController['getNextFragment'](
         bufferEnd,
-        levelDetails
+        levelDetails,
       );
       const resultSN = foundFragment ? foundFragment.sn : -1;
       expect(foundFragment).to.equal(
         mockFragments[3],
-        'Expected sn 3, found sn segment ' + resultSN
+        'Expected sn 3, found sn segment ' + resultSN,
       );
     });
 
@@ -142,12 +227,12 @@ describe('StreamController', function () {
       streamController['fragPrevious'] = null;
       const foundFragment = streamController['getNextFragment'](
         bufferEnd,
-        levelDetails
+        levelDetails,
       );
       const resultSN = foundFragment ? foundFragment.sn : -1;
       expect(foundFragment).to.equal(
         mockFragments[3],
-        'Expected sn 3, found sn segment ' + resultSN
+        'Expected sn 3, found sn segment ' + resultSN,
       );
     });
 
@@ -182,13 +267,13 @@ describe('StreamController', function () {
         it('does PDT search, choosing fragment after level loaded', function () {
           const foundFragment = streamController['getInitialLiveFragment'](
             levelDetails,
-            mockFragments
+            mockFragments,
           );
           expect(foundFragment).to.equal(
             mockFragments[4],
             `Expected sn 4, found sn segment ${
               foundFragment ? foundFragment.sn : -1
-            }`
+            }`,
           );
         });
       });
@@ -218,25 +303,25 @@ describe('StreamController', function () {
           fragPrevious.sn = 0;
           let foundFragment = streamController['getInitialLiveFragment'](
             levelDetails,
-            fragmentsWithoutPdt
+            fragmentsWithoutPdt,
           );
           expect(foundFragment).to.equal(
             fragmentsWithoutPdt[1],
             `Expected sn 1, found sn segment ${
               foundFragment ? foundFragment.sn : -1
-            }`
+            }`,
           );
 
           fragPrevious.sn = 3;
           foundFragment = streamController['getInitialLiveFragment'](
             levelDetails,
-            fragmentsWithoutPdt
+            fragmentsWithoutPdt,
           );
           expect(foundFragment).to.equal(
             fragmentsWithoutPdt[4],
             `Expected sn 4, found sn segment ${
               foundFragment ? foundFragment.sn : -1
-            }`
+            }`,
           );
         });
 
@@ -245,13 +330,13 @@ describe('StreamController', function () {
 
           const foundFragment = streamController['getInitialLiveFragment'](
             levelDetails,
-            fragmentsWithoutPdt
+            fragmentsWithoutPdt,
           );
           expect(foundFragment).to.equal(
             fragmentsWithoutPdt[2],
             `Expected sn 2, found sn segment ${
               foundFragment ? foundFragment.sn : -1
-            }`
+            }`,
           );
         });
 
@@ -259,13 +344,13 @@ describe('StreamController', function () {
           fragPrevious.cc = 0;
           const foundFragment = streamController['getInitialLiveFragment'](
             levelDetails,
-            fragmentsWithoutPdt
+            fragmentsWithoutPdt,
           );
           expect(foundFragment).to.equal(
             fragmentsWithoutPdt[0],
             `Expected sn 0, found sn segment ${
               foundFragment ? foundFragment.sn : -1
-            }`
+            }`,
           );
         });
 
@@ -273,7 +358,7 @@ describe('StreamController', function () {
           fragPrevious.cc = 2;
           const foundFragment = streamController['getInitialLiveFragment'](
             levelDetails,
-            fragmentsWithoutPdt
+            fragmentsWithoutPdt,
           );
           expect(foundFragment).to.equal(null);
         });
@@ -288,7 +373,7 @@ describe('StreamController', function () {
 
     let triggerSpy;
     let frag;
-    let levelDetails;
+    let level;
     beforeEach(function () {
       streamController['levels'] = [
         new Level({
@@ -302,8 +387,14 @@ describe('StreamController', function () {
       frag = new Fragment(PlaylistLevelType.MAIN, '');
       frag.level = 0;
       frag.url = 'file';
-      levelDetails = new LevelDetails('');
-      levelDetails.fragments.push(frag);
+      level = new Level({
+        attrs: new AttrList({}),
+        bitrate: 1,
+        name: '',
+        url: '',
+      });
+      level.details = new LevelDetails('');
+      level.details.fragments.push(frag);
     });
 
     function assertLoadingState(frag) {
@@ -321,25 +412,19 @@ describe('StreamController', function () {
 
     it('should load a complete fragment which has not been previously appended', function () {
       fragStateStub(FragmentState.NOT_LOADED);
-      streamController['loadFragment'](frag, levelDetails, 0);
+      streamController['loadFragment'](frag, level, 0);
       assertLoadingState(frag);
-    });
-
-    it('should not load a partial fragment', function () {
-      fragStateStub(FragmentState.PARTIAL);
-      streamController['loadFragment'](frag, levelDetails, 0);
-      assertNotLoadingState();
     });
 
     it('should not load a fragment which has completely & successfully loaded', function () {
       fragStateStub(FragmentState.OK);
-      streamController['loadFragment'](frag, levelDetails, 0);
+      streamController['loadFragment'](frag, level, 0);
       assertNotLoadingState();
     });
 
     it('should not load a fragment while it is appending', function () {
       fragStateStub(FragmentState.APPENDING);
-      streamController['loadFragment'](frag, levelDetails, 0);
+      streamController['loadFragment'](frag, level, 0);
       assertNotLoadingState();
     });
   });
@@ -352,6 +437,7 @@ describe('StreamController', function () {
       // @ts-ignore
       streamController.gapController = {
         poll: function () {},
+        destroy: function () {},
       };
       streamController['media'] = {
         buffered: {
@@ -384,6 +470,12 @@ describe('StreamController', function () {
       firstFrag.start = 0;
       firstFrag.sn = 1;
       firstFrag.cc = 0;
+      firstFrag.elementaryStreams.video = {
+        startDTS: 0,
+        startPTS: 0,
+        endDTS: 5,
+        endPTS: 5,
+      };
       // @ts-ignore
       const seekStub = sandbox.stub(streamController, 'seekToStartPos');
       streamController['loadedmetadata'] = false;
@@ -429,20 +521,28 @@ describe('StreamController', function () {
 
     describe('startLoad', function () {
       beforeEach(function () {
-        streamController['levels'] = [
-          new Level({
-            name: '',
-            url: '',
-            attrs,
-            bitrate: 500000,
-          }),
-          new Level({
-            name: '',
-            url: '',
-            attrs,
-            bitrate: 250000,
-          }),
-        ];
+        hls.trigger(Events.LEVELS_UPDATED, {
+          levels: [
+            new Level({
+              name: '',
+              url: '',
+              attrs,
+              bitrate: 500000,
+            }),
+            new Level({
+              name: '',
+              url: '',
+              attrs,
+              bitrate: 250000,
+            }),
+            new Level({
+              name: '',
+              url: '',
+              attrs,
+              bitrate: 750000,
+            }),
+          ],
+        });
         streamController['media'] = null;
       });
       it('should not start when controller does not have level data', function () {
@@ -496,24 +596,26 @@ describe('StreamController', function () {
       it('should not signal a bandwidth test if config.testBandwidth is false', function () {
         streamController['startFragRequested'] = false;
         hls.startLevel = -1;
-        hls.nextAutoLevel = 3;
+        hls.nextAutoLevel = 2;
         hls.config.testBandwidth = false;
 
         streamController.startLoad(-1);
-        expect(streamController['level']).to.equal(hls.nextAutoLevel);
+        expect(streamController['level']).to.equal(2);
         expect(streamController['bitrateTest']).to.be.false;
       });
 
       it('should not signal a bandwidth test with only one level', function () {
         streamController['startFragRequested'] = false;
-        streamController['levels'] = [
-          new Level({
-            name: '',
-            url: '',
-            attrs,
-            bitrate: 250000,
-          }),
-        ];
+        hls.trigger(Events.LEVELS_UPDATED, {
+          levels: [
+            new Level({
+              name: '',
+              url: '',
+              attrs,
+              bitrate: 250000,
+            }),
+          ],
+        });
         hls.startLevel = -1;
 
         streamController.startLoad(-1);

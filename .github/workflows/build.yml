@@ -8,9 +8,16 @@ on:
 
 permissions: {}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   config:
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:config:${{ github.ref }}'
+      cancel-in-progress: true
     outputs:
       canUseSauce: ${{ steps.check_sauce_access.outputs.result == 'true' }}
       tag: ${{ steps.extract_tag.outputs.result }}
@@ -20,7 +27,7 @@ jobs:
         id: check_sauce_access
         run: |
           if ! [[ -z "$SAUCE_USERNAME" ]] && ! [[ -z "$SAUCE_ACCESS_KEY" ]]; then
-            echo "::set-output name=result::true"
+            echo "result=true" >> $GITHUB_OUTPUT
           fi
         env:
           CI: true
@@ -28,7 +35,7 @@ jobs:
           SAUCE_ACCESS_KEY: ${{ secrets.SAUCE_ACCESS_KEY }}
       - name: extract tag
         id: extract_tag
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const prefix = 'refs/tags/';
@@ -39,15 +46,16 @@ jobs:
   build:
     needs: config
     runs-on: ubuntu-latest
-
+    concurrency:
+      group: 'build:build:${{ github.ref }}'
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: check package-lock.json version
-        id: extract_tag
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
@@ -61,7 +69,7 @@ jobs:
             }
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -73,9 +81,9 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version-file: '.node-version'
 
       - name: install
         run: |
@@ -90,7 +98,7 @@ jobs:
 
       - name: set version
         run: |
-          node ./scripts/set-package-version.js
+          ./scripts/set-package-version.sh
         env:
           CI: true
           TAG: ${{ needs.config.outputs.tag }}
@@ -99,6 +107,8 @@ jobs:
         run: |
           npm run build:ci
           npm run docs
+          ./scripts/check-docs-built.sh
+
           # check that hls.js doesn't error if requiring in node
           # see https://github.com/video-dev/hls.js/pull/1642
           node -e 'require("./" + require("./package.json").main)'
@@ -106,22 +116,27 @@ jobs:
           CI: true
 
       - name: upload build
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build
+          # version number is set in package.json so need to include that
           path: |
-            **
-            !**/[.]*/**
-            !**/node_modules/
+            package.json
+            package-lock.json
+            api-docs/**
+            dist/**
 
   test_unit:
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:test_unit:${{ github.ref }}'
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -133,12 +148,12 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
@@ -154,15 +169,18 @@ jobs:
         env:
           CI: true
 
-  netlify:
+  cloudflare_pages:
     needs: [config, test_unit]
     if: needs.config.outputs.tag || needs.config.outputs.isMainBranch == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:cloudflare_pages:${{ github.ref }}'
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -174,12 +192,12 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
@@ -189,24 +207,27 @@ jobs:
         env:
           CI: true
 
-      - name: build netlify
+      - name: build for CloudFlare
         run: |
-          ./scripts/build-netlify.sh
+          ./scripts/build-cloudflare.sh
         env:
           CI: true
 
-      - name: deploy netlify
+      - name: deploy to CloudFlare
         run: |
-          ./scripts/deploy-netlify.sh
+          ./scripts/deploy-cloudflare.sh
         env:
           CI: true
           GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
-          NETLIFY_ACCESS_TOKEN: ${{ secrets.NETLIFY_ACCESS_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
   update_draft_release:
     needs: [config, test_unit]
     if: needs.config.outputs.tag
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:update_draft_release:${{ github.ref }}'
+      cancel-in-progress: true
     outputs:
       upload_url: ${{ steps.draft_release.outputs.upload_url }}
     permissions:
@@ -225,18 +246,21 @@ jobs:
     needs: [config, test_unit, update_draft_release]
     if: needs.config.outputs.tag
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:release_github:${{ github.ref }}'
+      cancel-in-progress: true
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
@@ -258,11 +282,16 @@ jobs:
     needs: [config, test_unit]
     if: needs.config.outputs.tag || needs.config.outputs.isMainBranch == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:release_npm:${{ github.ref }}'
+      cancel-in-progress: true
+    permissions:
+      id-token: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -274,12 +303,12 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
@@ -301,22 +330,32 @@ jobs:
     needs: [config, test_unit]
     if: needs.config.outputs.canUseSauce == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:test_functional_required:${{ matrix.config }}:${{ github.ref }}'
+      cancel-in-progress: true
+    name: test_functional_required (${{ matrix.config }})
     strategy:
       fail-fast: true
       max-parallel: 8
       matrix:
-        config: [chrome-win_10]
-
         include:
           - config: chrome-win_10
             ua: chrome
             os: Windows 10
+          - config: chrome-osx_10.11-79.0
+            ua: chrome
+            os: OS X 10.11
+            uaVersion: '79.0'
+          - config: chrome-win_7-75.0
+            ua: chrome
+            os: Windows 7
+            uaVersion: '75.0'
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -328,17 +367,17 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
       - name: start SauceConnect tunnel
-        uses: saucelabs/sauce-connect-action@5c0cf29805c7fe68f2dec68c6384332fb1ba73f9
+        uses: saucelabs/sauce-connect-action@270345f214aca56f55c678ca59e626dfd43da153 #v2
         with:
           username: ${{ secrets.SAUCE_USERNAME }}
           accessKey: ${{ secrets.SAUCE_ACCESS_KEY }}
@@ -367,38 +406,28 @@ jobs:
   test_functional_optional:
     needs: test_functional_required
     runs-on: ubuntu-latest
+    concurrency:
+      group: 'build:test_functional_optional:${{ matrix.config }}:${{ github.ref }}'
+      cancel-in-progress: true
     continue-on-error: true
+    name: test_functional_optional (${{ matrix.config }})
     strategy:
       fail-fast: false
       max-parallel: 8
       matrix:
-        config:
-          - safari-macOS_10.15
-          - firefox-win_10
-          - chrome-osx_10.11-79.0
-          - chrome-win_7-75.0
-
         include:
-          - config: safari-macOS_10.15
+          - config: safari-macOS_13
             ua: safari
-            os: macOS 10.15
+            os: macOS 13
           - config: firefox-win_10
             ua: firefox
             os: Windows 10
-          - config: chrome-osx_10.11-79.0
-            ua: chrome
-            os: OS X 10.11
-            uaVersion: '79.0'
-          - config: chrome-win_7-75.0
-            ua: chrome
-            os: Windows 7
-            uaVersion: '75.0'
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: cache node_modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         env:
           cache-name: cache-node-modules
         with:
@@ -410,17 +439,17 @@ jobs:
             ${{ runner.os }}-
 
       - name: use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version-file: '.node-version'
 
       - name: download build
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build
 
       - name: start SauceConnect tunnel
-        uses: saucelabs/sauce-connect-action@5c0cf29805c7fe68f2dec68c6384332fb1ba73f9
+        uses: saucelabs/sauce-connect-action@270345f214aca56f55c678ca59e626dfd43da153 #v2
         with:
           username: ${{ secrets.SAUCE_USERNAME }}
           accessKey: ${{ secrets.SAUCE_ACCESS_KEY }}

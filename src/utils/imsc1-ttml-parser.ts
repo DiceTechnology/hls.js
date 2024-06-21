@@ -2,7 +2,10 @@ import { findBox } from './mp4-tools';
 import { parseTimeStamp } from './vttparser';
 import VTTCue from './vttcue';
 import { utf8ArrayToStr } from '../demux/id3';
-import { toTimescaleFromScale } from './timescale-conversion';
+import {
+  RationalTimestamp,
+  toTimescaleFromScale,
+} from './timescale-conversion';
 import { generateCueId } from './webvtt-parser';
 
 export const IMSC1_CODEC = 'stpp.ttml.im1t';
@@ -23,10 +26,9 @@ const textAlignToLineAlign: Partial<Record<string, LineAlignSetting>> = {
 
 export function parseIMSC1(
   payload: ArrayBuffer,
-  initPTS: number,
-  timescale: number,
+  initPTS: RationalTimestamp,
   callBack: (cues: Array<VTTCue>) => any,
-  errorCallBack: (error: Error) => any
+  errorCallBack: (error: Error) => any,
 ) {
   const results = findBox(new Uint8Array(payload), ['mdat']);
   if (results.length === 0) {
@@ -36,7 +38,7 @@ export function parseIMSC1(
 
   const ttmlList = results.map((mdat) => utf8ArrayToStr(mdat));
 
-  const syncTime = toTimescaleFromScale(initPTS, 1, timescale);
+  const syncTime = toTimescaleFromScale(initPTS.baseTime, 1, initPTS.timescale);
 
   try {
     ttmlList.forEach((ttml) => callBack(parseTTML(ttml, syncTime)));
@@ -63,16 +65,16 @@ function parseTTML(ttml: string, syncTime: number): Array<VTTCue> {
       result[key] = tt.getAttribute(`ttp:${key}`) || defaultRateInfo[key];
       return result;
     },
-    {}
+    {},
   );
 
   const trim = tt.getAttribute('xml:space') !== 'preserve';
 
   const styleElements = collectionToDictionary(
-    getElementCollection(tt, 'styling', 'style')
+    getElementCollection(tt, 'styling', 'style'),
   );
   const regionElements = collectionToDictionary(
-    getElementCollection(tt, 'layout', 'region')
+    getElementCollection(tt, 'layout', 'region'),
   );
   const cueElements = getElementCollection(tt, 'body', '[begin]');
 
@@ -85,7 +87,7 @@ function parseTTML(ttml: string, syncTime: number): Array<VTTCue> {
       }
       const startTime = parseTtmlTime(
         cueElement.getAttribute('begin'),
-        rateInfo
+        rateInfo,
       );
       const duration = parseTtmlTime(cueElement.getAttribute('dur'), rateInfo);
       let endTime = parseTtmlTime(cueElement.getAttribute('end'), rateInfo);
@@ -103,11 +105,6 @@ function parseTTML(ttml: string, syncTime: number): Array<VTTCue> {
 
       const region = regionElements[cueElement.getAttribute('region')];
       const style = styleElements[cueElement.getAttribute('style')];
-
-      // TODO: Add regions to track and cue (origin and extend)
-      // These values are hard-coded (for now) to simulate region settings in the demo
-      cue.position = 10;
-      cue.size = 80;
 
       // Apply styles to cue
       const styles = getTtmlStyles(region, style, styleElements);
@@ -130,7 +127,7 @@ function parseTTML(ttml: string, syncTime: number): Array<VTTCue> {
 function getElementCollection(
   fromElement,
   parentName,
-  childName
+  childName,
 ): Array<HTMLElement> {
   const parent = fromElement.getElementsByTagName(parentName)[0];
   if (parent) {
@@ -168,7 +165,7 @@ function getTextContent(element, trim): string {
 function getTtmlStyles(
   region,
   style,
-  styleElements
+  styleElements,
 ): { [style: string]: string } {
   const ttsNs = 'http://www.w3.org/ns/ttml#styling';
   let regionStyle = null;

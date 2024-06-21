@@ -19,6 +19,7 @@ import {
   parseSamples,
   parseInitSegment,
   RemuxerTrackIdConfig,
+  hasMoofData,
 } from '../utils/mp4-tools';
 import { dummyTrack } from './dummy-demuxed-track';
 import type { HlsEventEmitter } from '../events';
@@ -42,27 +43,31 @@ class MP4Demuxer implements Demuxer {
   public resetTimeStamp() {}
 
   public resetInitSegment(
-    initSegment: Uint8Array,
+    initSegment: Uint8Array | undefined,
     audioCodec: string | undefined,
     videoCodec: string | undefined,
-    trackDuration: number
+    trackDuration: number,
   ) {
-    const initData = parseInitSegment(initSegment);
     const videoTrack = (this.videoTrack = dummyTrack(
       'video',
-      1
+      1,
     ) as PassthroughTrack);
     const audioTrack = (this.audioTrack = dummyTrack(
       'audio',
-      1
+      1,
     ) as DemuxedAudioTrack);
     const captionTrack = (this.txtTrack = dummyTrack(
       'text',
-      1
+      1,
     ) as DemuxedUserdataTrack);
 
     this.id3Track = dummyTrack('id3', 1) as DemuxedMetadataTrack;
     this.timeOffset = 0;
+
+    if (!initSegment?.byteLength) {
+      return;
+    }
+    const initData = parseInitSegment(initSegment);
 
     if (initData.video) {
       const { id, timescale, codec } = initData.video;
@@ -83,12 +88,12 @@ class MP4Demuxer implements Demuxer {
     videoTrack.duration = audioTrack.duration = trackDuration;
   }
 
-  public resetContiguity(): void {}
+  public resetContiguity(): void {
+    this.remainderData = null;
+  }
 
   static probe(data: Uint8Array) {
-    // ensure we find a moof box in the first 16 kB
-    data = data.length > 16384 ? data.subarray(0, 16384) : data;
-    return findBox(data, ['moof']).length > 0;
+    return hasMoofData(data);
   }
 
   public demux(data: Uint8Array, timeOffset: number): DemuxerResult {
@@ -142,7 +147,7 @@ class MP4Demuxer implements Demuxer {
 
   private extractID3Track(
     videoTrack: PassthroughTrack,
-    timeOffset: number
+    timeOffset: number,
   ): DemuxedMetadataTrack {
     const id3Track = this.id3Track as DemuxedMetadataTrack;
     if (videoTrack.samples.length) {
@@ -155,6 +160,14 @@ class MP4Demuxer implements Demuxer {
               ? emsgInfo.presentationTime! / emsgInfo.timeScale
               : timeOffset +
                 emsgInfo.presentationTimeDelta! / emsgInfo.timeScale;
+            let duration =
+              emsgInfo.eventDuration === 0xffffffff
+                ? Number.POSITIVE_INFINITY
+                : emsgInfo.eventDuration / emsgInfo.timeScale;
+            // Safari takes anything <= 0.001 seconds and maps it to Infinity
+            if (duration <= 0.001) {
+              duration = Number.POSITIVE_INFINITY;
+            }
             const payload = emsgInfo.payload;
             id3Track.samples.push({
               data: payload,
@@ -162,6 +175,7 @@ class MP4Demuxer implements Demuxer {
               dts: pts,
               pts: pts,
               type: MetadataSchema.emsg,
+              duration: duration,
             });
           }
         });
@@ -173,10 +187,10 @@ class MP4Demuxer implements Demuxer {
   demuxSampleAes(
     data: Uint8Array,
     keyData: KeyData,
-    timeOffset: number
+    timeOffset: number,
   ): Promise<DemuxerResult> {
     return Promise.reject(
-      new Error('The MP4 demuxer does not support SAMPLE-AES decryption')
+      new Error('The MP4 demuxer does not support SAMPLE-AES decryption'),
     );
   }
 

@@ -5,9 +5,9 @@ import { Events } from '../../../src/events';
 import { LevelDetails } from '../../../src/loader/level-details';
 import { LevelUpdatedData } from '../../../src/types/events';
 
-import * as sinon from 'sinon';
-import * as chai from 'chai';
-import * as sinonChai from 'sinon-chai';
+import sinon from 'sinon';
+import chai from 'chai';
+import sinonChai from 'sinon-chai';
 
 chai.use(sinonChai);
 const expect = chai.expect;
@@ -46,7 +46,7 @@ describe('LatencyController', function () {
       edgeStub.get(() => value);
       latencyController['onLevelUpdated'](
         Events.LEVEL_UPDATED,
-        levelUpdatedData
+        levelUpdatedData,
       );
     });
     const ageStub = sinon.stub(levelDetails, 'age');
@@ -55,7 +55,7 @@ describe('LatencyController', function () {
       ageStub.get(() => value);
       latencyController['onLevelUpdated'](
         Events.LEVEL_UPDATED,
-        levelUpdatedData
+        levelUpdatedData,
       );
     });
     let currentTime = 0;

@@ -17,7 +17,7 @@ Please review the project [Code of Conduct](https://github.com/video-dev/hls.js/
 
 First, if you found an issue, **ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/video-dev/hls.js/issues).
 
-If you're unable to find an open issue addressing the problem, open a new one using the [bug report template](https://github.com/video-dev/hls.js/issues/new?template=bug_report.md). As part of your issue, make sure to include:
+If you're unable to find an open issue addressing the problem, open a new one using the [bug report template](https://github.com/video-dev/hls.js/issues/new?template=bug.yaml). As part of your issue, make sure to include:
 
 - Test stream/page (if possible)
 - hls.js configuration
@@ -31,7 +31,7 @@ If the issue is related to your stream, and you cannot share the stream, please 
 
 ## Feature Requests
 
-File feature requests using the [Feature request template](https://github.com/video-dev/hls.js/issues/new?assignees=&labels=&template=feature_request.md) filling out all parts.
+File feature requests using the [Feature request template](https://github.com/video-dev/hls.js/issues/new?assignees=&labels=&template=feature.yaml) filling out all parts.
 
 Like with bug reports, please be as detailed as possible and try to make sure other contributors have everything they need to understand your request and how it will improve the project.
 
@@ -47,4 +47,4 @@ Pull requests are welcome and pair well with bug reports and feature requests. H
 
 ## Contact
 
-If you aren't already a member, consider joining video-dev on Slack https://video-dev.herokuapp.com/ and chatting with us in the `#hlsjs` channel.
+If you aren't already a member, consider joining video-dev on Slack https://www.video-dev.org/ and chatting with us in the `#hlsjs` channel.

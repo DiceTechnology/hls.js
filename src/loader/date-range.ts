@@ -1,7 +1,8 @@
 import { AttrList } from '../utils/attr-list';
 import { logger } from '../utils/logger';
 
-export enum DateRangeAttribute {
+// Avoid exporting const enum so that these values can be inlined
+const enum DateRangeAttribute {
   ID = 'ID',
   CLASS = 'CLASS',
   START_DATE = 'START-DATE',
@@ -11,6 +12,24 @@ export enum DateRangeAttribute {
   PLANNED_DURATION = 'PLANNED-DURATION',
   SCTE35_OUT = 'SCTE35-OUT',
   SCTE35_IN = 'SCTE35-IN',
+}
+
+export function isDateRangeCueAttribute(attrName: string): boolean {
+  return (
+    attrName !== DateRangeAttribute.ID &&
+    attrName !== DateRangeAttribute.CLASS &&
+    attrName !== DateRangeAttribute.START_DATE &&
+    attrName !== DateRangeAttribute.DURATION &&
+    attrName !== DateRangeAttribute.END_DATE &&
+    attrName !== DateRangeAttribute.END_ON_NEXT
+  );
+}
+
+export function isSCTE35Attribute(attrName: string): boolean {
+  return (
+    attrName === DateRangeAttribute.SCTE35_OUT ||
+    attrName === DateRangeAttribute.SCTE35_IN
+  );
 }
 
 export class DateRange {
@@ -28,7 +47,7 @@ export class DateRange {
           dateRangeAttr[key] !== previousAttr[key]
         ) {
           logger.warn(
-            `DATERANGE tag attribute: "${key}" does not match for tags with ID: "${dateRangeAttr.ID}"`
+            `DATERANGE tag attribute: "${key}" does not match for tags with ID: "${dateRangeAttr.ID}"`,
           );
           this._badValueForSameId = key;
           break;
@@ -38,7 +57,7 @@ export class DateRange {
       dateRangeAttr = Object.assign(
         new AttrList({}),
         previousAttr,
-        dateRangeAttr
+        dateRangeAttr,
       );
     }
     this.attr = dateRangeAttr;
@@ -77,7 +96,7 @@ export class DateRange {
   get duration(): number | null {
     if (DateRangeAttribute.DURATION in this.attr) {
       const duration = this.attr.decimalFloatingPoint(
-        DateRangeAttribute.DURATION
+        DateRangeAttribute.DURATION,
       );
       if (Number.isFinite(duration)) {
         return duration;
@@ -91,7 +110,7 @@ export class DateRange {
   get plannedDuration(): number | null {
     if (DateRangeAttribute.PLANNED_DURATION in this.attr) {
       return this.attr.decimalFloatingPoint(
-        DateRangeAttribute.PLANNED_DURATION
+        DateRangeAttribute.PLANNED_DURATION,
       );
     }
     return null;

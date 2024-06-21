@@ -1,15 +1,16 @@
 import { buildAbsoluteURL } from 'url-toolkit';
-import { logger } from '../utils/logger';
 import { LevelKey } from './level-key';
 import { LoadStats } from './load-stats';
 import { AttrList } from '../utils/attr-list';
 import type {
   FragmentLoaderContext,
+  KeyLoaderContext,
   Loader,
   PlaylistLevelType,
 } from '../types/loader';
+import type { KeySystemFormats } from '../utils/mediakeys-helper';
 
-export enum ElementaryStreamTypes {
+export const enum ElementaryStreamTypes {
   AUDIO = 'audio',
   VIDEO = 'video',
   AUDIOVIDEO = 'audiovideo',
@@ -29,7 +30,7 @@ export type ElementaryStreams = Record<
 >;
 
 export class BaseSegment {
-  private _byteRange: number[] | null = null;
+  private _byteRange: [number, number] | null = null;
   private _url: string | null = null;
 
   // baseurl is the URL to the playlist
@@ -50,17 +51,16 @@ export class BaseSegment {
   // setByteRange converts a EXT-X-BYTERANGE attribute into a two element array
   setByteRange(value: string, previous?: BaseSegment) {
     const params = value.split('@', 2);
-    const byteRange: number[] = [];
+    let start: number;
     if (params.length === 1) {
-      byteRange[0] = previous ? previous.byteRangeEndOffset : 0;
+      start = previous?.byteRangeEndOffset || 0;
     } else {
-      byteRange[0] = parseInt(params[1]);
+      start = parseInt(params[1]);
     }
-    byteRange[1] = parseInt(params[0]) + byteRange[0];
-    this._byteRange = byteRange;
+    this._byteRange = [start, parseInt(params[0]) + start];
   }
 
-  get byteRange(): number[] {
+  get byteRange(): [number, number] | [] {
     if (!this._byteRange) {
       return [];
     }
@@ -68,11 +68,11 @@ export class BaseSegment {
     return this._byteRange;
   }
 
-  get byteRangeStartOffset(): number {
+  get byteRangeStartOffset(): number | undefined {
     return this.byteRange[0];
   }
 
-  get byteRangeEndOffset(): number {
+  get byteRangeEndOffset(): number | undefined {
     return this.byteRange[1];
   }
 
@@ -90,6 +90,9 @@ export class BaseSegment {
   }
 }
 
+/**
+ * Object representing parsed data from an HLS Segment. Found in {@link hls.js#LevelDetails.fragments}.
+ */
 export class Fragment extends BaseSegment {
   private _decryptdata: LevelKey | null = null;
 
@@ -101,14 +104,16 @@ export class Fragment extends BaseSegment {
   public duration: number = 0;
   // sn notates the sequence number for a segment, and if set to a string can be 'initSegment'
   public sn: number | 'initSegment' = 0;
-  // levelkey is the EXT-X-KEY that applies to this segment for decryption
+  // levelkeys are the EXT-X-KEY tags that apply to this segment for decryption
   // core difference from the private field _decryptdata is the lack of the initialized IV
   // _decryptdata will set the IV for this segment based on the segment number in the fragment
-  public levelkey?: LevelKey;
+  public levelkeys?: { [key: string]: LevelKey };
   // A string representing the fragment type
   public readonly type: PlaylistLevelType;
   // A reference to the loader. Set while the fragment is loading, and removed afterwards. Used to abort fragment loading
   public loader: Loader<FragmentLoaderContext> | null = null;
+  // A reference to the key loader. Set while the key is loading, and removed afterwards. Used to abort key loading
+  public keyLoader: Loader<KeyLoaderContext> | null = null;
   // The level/track index to which the fragment belongs
   public level: number = -1;
   // The continuity counter of the fragment
@@ -117,8 +122,6 @@ export class Fragment extends BaseSegment {
   public startPTS?: number;
   // The ending Presentation Time Stamp (PTS) of the fragment. Set after transmux complete.
   public endPTS?: number;
-  // The latest Presentation Time Stamp (PTS) appended to the buffer.
-  public appendedPTS?: number;
   // The starting Decode Time Stamp (DTS) of the fragment. Set after transmux complete.
   public startDTS!: number;
   // The ending Decode Time Stamp (DTS) of the fragment. Set after transmux complete.
@@ -133,7 +136,7 @@ export class Fragment extends BaseSegment {
   public minEndPTS?: number;
   // Load/parse timing information
   public stats: LoadStats = new LoadStats();
-  public urlId: number = 0;
+  // Init Segment bytes (unset for media segments)
   public data?: Uint8Array;
   // A flag indicating whether the segment was downloaded in order to test bitrate, and was not buffered
   public bitrateTest: boolean = false;
@@ -141,6 +144,12 @@ export class Fragment extends BaseSegment {
   public title: string | null = null;
   // The Media Initialization Section for this segment
   public initSegment: Fragment | null = null;
+  // Fragment is the last fragment in the media playlist
+  public endList?: boolean;
+  // Fragment is marked by an EXT-X-GAP tag indicating that it does not contain media data and should not be loaded
+  public gap?: boolean;
+  // Deprecated
+  public urlId: number = 0;
 
   constructor(type: PlaylistLevelType, baseurl: string) {
     super(baseurl);
@@ -148,36 +157,25 @@ export class Fragment extends BaseSegment {
   }
 
   get decryptdata(): LevelKey | null {
-    if (!this.levelkey && !this._decryptdata) {
+    const { levelkeys } = this;
+    if (!levelkeys && !this._decryptdata) {
       return null;
     }
 
-    if (!this._decryptdata && this.levelkey) {
-      let sn = this.sn;
-      if (typeof sn !== 'number') {
-        // We are fetching decryption data for a initialization segment
-        // If the segment was encrypted with AES-128
-        // It must have an IV defined. We cannot substitute the Segment Number in.
-        if (
-          this.levelkey &&
-          this.levelkey.method === 'AES-128' &&
-          !this.levelkey.iv
-        ) {
-          logger.warn(
-            `missing IV for initialization segment with method="${this.levelkey.method}" - compliance issue`
-          );
+    if (!this._decryptdata && this.levelkeys && !this.levelkeys.NONE) {
+      const key = this.levelkeys.identity;
+      if (key) {
+        this._decryptdata = key.getDecryptData(this.sn);
+      } else {
+        const keyFormats = Object.keys(this.levelkeys);
+        if (keyFormats.length === 1) {
+          return (this._decryptdata = this.levelkeys[
+            keyFormats[0]
+          ].getDecryptData(this.sn));
+        } else {
+          // Multiple keys. key-loader to call Fragment.setKeyFormat based on selected key-system.
         }
-
-        /*
-        Be converted to a Number.
-        'initSegment' will become NaN.
-        NaN, which when converted through ToInt32() -> +0.
-        ---
-        Explicitly set sn to resulting value from implicit conversions 'initSegment' values for IV generation.
-        */
-        sn = 0;
       }
-      this._decryptdata = this.setDecryptDataFromLevelKey(this.levelkey, sn);
     }
 
     return this._decryptdata;
@@ -205,48 +203,31 @@ export class Fragment extends BaseSegment {
     // At the m3u8-parser level we need to add support for manifest signalled keyformats
     // when we want the fragment to start reporting that it is encrypted.
     // Currently, keyFormat will only be set for identity keys
-    if (this.decryptdata?.keyFormat && this.decryptdata.uri) {
+    if (this._decryptdata?.encrypted) {
       return true;
+    } else if (this.levelkeys) {
+      const keyFormats = Object.keys(this.levelkeys);
+      const len = keyFormats.length;
+      if (len > 1 || (len === 1 && this.levelkeys[keyFormats[0]].encrypted)) {
+        return true;
+      }
     }
 
     return false;
   }
 
-  /**
-   * Utility method for parseLevelPlaylist to create an initialization vector for a given segment
-   * @param {number} segmentNumber - segment number to generate IV with
-   * @returns {Uint8Array}
-   */
-  createInitializationVector(segmentNumber: number): Uint8Array {
-    const uint8View = new Uint8Array(16);
-
-    for (let i = 12; i < 16; i++) {
-      uint8View[i] = (segmentNumber >> (8 * (15 - i))) & 0xff;
+  setKeyFormat(keyFormat: KeySystemFormats) {
+    if (this.levelkeys) {
+      const key = this.levelkeys[keyFormat];
+      if (key && !this._decryptdata) {
+        this._decryptdata = key.getDecryptData(this.sn);
+      }
     }
-
-    return uint8View;
   }
 
-  /**
-   * Utility method for parseLevelPlaylist to get a fragment's decryption data from the currently parsed encryption key data
-   * @param levelkey - a playlist's encryption info
-   * @param segmentNumber - the fragment's segment number
-   * @returns {LevelKey} - an object to be applied as a fragment's decryptdata
-   */
-  setDecryptDataFromLevelKey(
-    levelkey: LevelKey,
-    segmentNumber: number
-  ): LevelKey {
-    let decryptdata = levelkey;
-
-    if (levelkey?.method === 'AES-128' && levelkey.uri && !levelkey.iv) {
-      decryptdata = LevelKey.fromURI(levelkey.uri);
-      decryptdata.method = levelkey.method;
-      decryptdata.iv = this.createInitializationVector(segmentNumber);
-      decryptdata.keyFormat = 'identity';
-    }
-
-    return decryptdata;
+  abortRequests(): void {
+    this.loader?.abort();
+    this.keyLoader?.abort();
   }
 
   setElementaryStreamInfo(
@@ -255,7 +236,7 @@ export class Fragment extends BaseSegment {
     endPTS: number,
     startDTS: number,
     endDTS: number,
-    partial: boolean = false
+    partial: boolean = false,
   ) {
     const { elementaryStreams } = this;
     const info = elementaryStreams[type];
@@ -284,6 +265,9 @@ export class Fragment extends BaseSegment {
   }
 }
 
+/**
+ * Object representing parsed data from an HLS Partial Segment. Found in {@link hls.js#LevelDetails.partList}.
+ */
 export class Part extends BaseSegment {
   public readonly fragOffset: number = 0;
   public readonly duration: number = 0;
@@ -299,7 +283,7 @@ export class Part extends BaseSegment {
     frag: Fragment,
     baseurl: string,
     index: number,
-    previous?: Part
+    previous?: Part,
   ) {
     super(baseurl);
     this.duration = partAttrs.decimalFloatingPoint('DURATION');

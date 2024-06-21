@@ -1,7 +1,10 @@
-import { sliceUint8 } from './typed-array';
 import { ElementaryStreamTypes } from '../loader/fragment';
-import { PassthroughTrack, UserdataSample } from '../types/demuxer';
+import { sliceUint8 } from './typed-array';
 import { utf8ArrayToStr } from '../demux/id3';
+import { logger } from '../utils/logger';
+import Hex from './hex';
+import type { PassthroughTrack, UserdataSample } from '../types/demuxer';
+import type { DecryptData } from '../loader/level-key';
 
 const UINT32_MAX = Math.pow(2, 32) - 1;
 const push = [].push;
@@ -35,6 +38,13 @@ export function readUint32(buffer: Uint8Array, offset: number): number {
   return val < 0 ? 4294967296 + val : val;
 }
 
+export function readUint64(buffer: Uint8Array, offset: number) {
+  let result = readUint32(buffer, offset);
+  result *= Math.pow(2, 32);
+  result += readUint32(buffer, offset + 4);
+  return result;
+}
+
 export function readSint32(buffer: Uint8Array, offset: number): number {
   return (
     (buffer[offset] << 24) |
@@ -51,6 +61,25 @@ export function writeUint32(buffer: Uint8Array, offset: number, value: number) {
   buffer[offset + 3] = value & 0xff;
 }
 
+// Find "moof" box
+export function hasMoofData(data: Uint8Array): boolean {
+  const end = data.byteLength;
+  for (let i = 0; i < end; ) {
+    const size = readUint32(data, i);
+    if (
+      size > 8 &&
+      data[i + 4] === 0x6d &&
+      data[i + 5] === 0x6f &&
+      data[i + 6] === 0x6f &&
+      data[i + 7] === 0x66
+    ) {
+      return true;
+    }
+    i = size > 1 ? i + size : end;
+  }
+  return false;
+}
+
 // Find the data for a box specified by its path
 export function findBox(data: Uint8Array, path: string[]): Uint8Array[] {
   const results = [] as Uint8Array[];
@@ -64,7 +93,6 @@ export function findBox(data: Uint8Array, path: string[]): Uint8Array[] {
     const size = readUint32(data, i);
     const type = bin2str(data.subarray(i + 4, i + 8));
     const endbox = size > 1 ? i + size : end;
-
     if (type === path[0]) {
       if (path.length === 1) {
         // this is the end of the path and we've found the box we were
@@ -104,14 +132,16 @@ export function parseSegmentIndex(sidx: Uint8Array): SidxInfo | null {
   const timescale = readUint32(sidx, index);
   index += 4;
 
-  // TODO: parse earliestPresentationTime and firstOffset
-  // usually zero in our case
-  const earliestPresentationTime = 0;
-  const firstOffset = 0;
+  let earliestPresentationTime = 0;
+  let firstOffset = 0;
 
   if (version === 0) {
+    earliestPresentationTime = readUint32(sidx, index);
+    firstOffset = readUint32(sidx, index + 4);
     index += 8;
   } else {
+    earliestPresentationTime = readUint64(sidx, index);
+    firstOffset = readUint64(sidx, index + 8);
     index += 16;
   }
 
@@ -133,8 +163,7 @@ export function parseSegmentIndex(sidx: Uint8Array): SidxInfo | null {
     const referenceType = (referenceInfo & 0x80000000) >>> 31;
 
     if (referenceType === 1) {
-      // eslint-disable-next-line no-console
-      console.warn('SIDX has hierarchical references (not supported)');
+      logger.warn('SIDX has hierarchical references (not supported)');
       return null;
     }
 
@@ -185,8 +214,8 @@ export function parseSegmentIndex(sidx: Uint8Array): SidxInfo | null {
  * moov > trak > mdia > mdhd.timescale
  * moov > trak > mdia > hdlr
  * ```
- * @param initSegment {Uint8Array} the bytes of the init segment
- * @return {InitData} a hash of track type to timescale values or null if
+ * @param initSegment the bytes of the init segment
+ * @returns a hash of track type to timescale values or null if
  * the init segment is malformed.
  */
 
@@ -222,13 +251,11 @@ export function parseInitSegment(initSegment: Uint8Array): InitData {
     const tkhd = findBox(trak, ['tkhd'])[0];
     if (tkhd) {
       let version = tkhd[0];
-      let index = version === 0 ? 12 : 20;
-      const trackId = readUint32(tkhd, index);
+      const trackId = readUint32(tkhd, version === 0 ? 12 : 20);
       const mdhd = findBox(trak, ['mdia', 'mdhd'])[0];
       if (mdhd) {
         version = mdhd[0];
-        index = version === 0 ? 12 : 20;
-        const timescale = readUint32(mdhd, index);
+        const timescale = readUint32(mdhd, version === 0 ? 12 : 20);
         const hdlr = findBox(trak, ['mdia', 'hdlr'])[0];
         if (hdlr) {
           const hdlrType = bin2str(hdlr.subarray(8, 12));
@@ -239,18 +266,9 @@ export function parseInitSegment(initSegment: Uint8Array): InitData {
           if (type) {
             // Parse codec details
             const stsd = findBox(trak, ['mdia', 'minf', 'stbl', 'stsd'])[0];
-            let codec;
-            if (stsd) {
-              codec = bin2str(stsd.subarray(12, 16));
-              // TODO: Parse codec details to be able to build MIME type.
-              // stsd.start += 8;
-              // const codecBox = findBox(stsd, [codec])[0];
-              // if (codecBox) {
-              //   TODO: Codec parsing support for avc1, mp4a, hevc, av01...
-              // }
-            }
+            const stsdData = parseStsd(stsd);
             result[trackId] = { timescale, type };
-            result[type] = { timescale, id: trackId, codec };
+            result[type] = { timescale, id: trackId, ...stsdData };
           }
         }
       }
@@ -272,6 +290,265 @@ export function parseInitSegment(initSegment: Uint8Array): InitData {
   return result;
 }
 
+function parseStsd(stsd: Uint8Array): { codec: string; encrypted: boolean } {
+  const sampleEntries = stsd.subarray(8);
+  const sampleEntriesEnd = sampleEntries.subarray(8 + 78);
+  const fourCC = bin2str(sampleEntries.subarray(4, 8));
+  let codec = fourCC;
+  const encrypted = fourCC === 'enca' || fourCC === 'encv';
+  if (encrypted) {
+    const encBox = findBox(sampleEntries, [fourCC])[0];
+    const encBoxChildren = encBox.subarray(fourCC === 'enca' ? 28 : 78);
+    const sinfs = findBox(encBoxChildren, ['sinf']);
+    sinfs.forEach((sinf) => {
+      const schm = findBox(sinf, ['schm'])[0];
+      if (schm) {
+        const scheme = bin2str(schm.subarray(4, 8));
+        if (scheme === 'cbcs' || scheme === 'cenc') {
+          const frma = findBox(sinf, ['frma'])[0];
+          if (frma) {
+            // for encrypted content codec fourCC will be in frma
+            codec = bin2str(frma);
+          }
+        }
+      }
+    });
+  }
+  switch (codec) {
+    case 'avc1':
+    case 'avc2':
+    case 'avc3':
+    case 'avc4': {
+      // extract profile + compatibility + level out of avcC box
+      const avcCBox = findBox(sampleEntriesEnd, ['avcC'])[0];
+      codec += '.' + toHex(avcCBox[1]) + toHex(avcCBox[2]) + toHex(avcCBox[3]);
+      break;
+    }
+    case 'mp4a': {
+      const codecBox = findBox(sampleEntries, [fourCC])[0];
+      const esdsBox = findBox(codecBox.subarray(28), ['esds'])[0];
+      if (esdsBox && esdsBox.length > 12) {
+        let i = 4;
+        // ES Descriptor tag
+        if (esdsBox[i++] !== 0x03) {
+          break;
+        }
+        i = skipBERInteger(esdsBox, i);
+        i += 2; // skip es_id;
+        const flags = esdsBox[i++];
+        if (flags & 0x80) {
+          i += 2; // skip dependency es_id
+        }
+        if (flags & 0x40) {
+          i += esdsBox[i++]; // skip URL
+        }
+        // Decoder config descriptor
+        if (esdsBox[i++] !== 0x04) {
+          break;
+        }
+        i = skipBERInteger(esdsBox, i);
+        const objectType = esdsBox[i++];
+        if (objectType === 0x40) {
+          codec += '.' + toHex(objectType);
+        } else {
+          break;
+        }
+        i += 12;
+        // Decoder specific info
+        if (esdsBox[i++] !== 0x05) {
+          break;
+        }
+        i = skipBERInteger(esdsBox, i);
+        const firstByte = esdsBox[i++];
+        let audioObjectType = (firstByte & 0xf8) >> 3;
+        if (audioObjectType === 31) {
+          audioObjectType +=
+            1 + ((firstByte & 0x7) << 3) + ((esdsBox[i] & 0xe0) >> 5);
+        }
+        codec += '.' + audioObjectType;
+      }
+      break;
+    }
+    case 'hvc1':
+    case 'hev1': {
+      const hvcCBox = findBox(sampleEntriesEnd, ['hvcC'])[0];
+      const profileByte = hvcCBox[1];
+      const profileSpace = ['', 'A', 'B', 'C'][profileByte >> 6];
+      const generalProfileIdc = profileByte & 0x1f;
+      const profileCompat = readUint32(hvcCBox, 2);
+      const tierFlag = (profileByte & 0x20) >> 5 ? 'H' : 'L';
+      const levelIDC = hvcCBox[12];
+      const constraintIndicator = hvcCBox.subarray(6, 12);
+      codec += '.' + profileSpace + generalProfileIdc;
+      codec += '.' + profileCompat.toString(16).toUpperCase();
+      codec += '.' + tierFlag + levelIDC;
+      let constraintString = '';
+      for (let i = constraintIndicator.length; i--; ) {
+        const byte = constraintIndicator[i];
+        if (byte || constraintString) {
+          const encodedByte = byte.toString(16).toUpperCase();
+          constraintString = '.' + encodedByte + constraintString;
+        }
+      }
+      codec += constraintString;
+      break;
+    }
+    case 'dvh1':
+    case 'dvhe': {
+      const dvcCBox = findBox(sampleEntriesEnd, ['dvcC'])[0];
+      const profile = (dvcCBox[2] >> 1) & 0x7f;
+      const level = ((dvcCBox[2] << 5) & 0x20) | ((dvcCBox[3] >> 3) & 0x1f);
+      codec += '.' + addLeadingZero(profile) + '.' + addLeadingZero(level);
+      break;
+    }
+    case 'vp09': {
+      const vpcCBox = findBox(sampleEntriesEnd, ['vpcC'])[0];
+      const profile = vpcCBox[4];
+      const level = vpcCBox[5];
+      const bitDepth = (vpcCBox[6] >> 4) & 0x0f;
+      codec +=
+        '.' +
+        addLeadingZero(profile) +
+        '.' +
+        addLeadingZero(level) +
+        '.' +
+        addLeadingZero(bitDepth);
+      break;
+    }
+    case 'av01': {
+      const av1CBox = findBox(sampleEntriesEnd, ['av1C'])[0];
+      const profile = av1CBox[1] >>> 5;
+      const level = av1CBox[1] & 0x1f;
+      const tierFlag = av1CBox[2] >>> 7 ? 'H' : 'M';
+      const highBitDepth = (av1CBox[2] & 0x40) >> 6;
+      const twelveBit = (av1CBox[2] & 0x20) >> 5;
+      const bitDepth =
+        profile === 2 && highBitDepth
+          ? twelveBit
+            ? 12
+            : 10
+          : highBitDepth
+            ? 10
+            : 8;
+      const monochrome = (av1CBox[2] & 0x10) >> 4;
+      const chromaSubsamplingX = (av1CBox[2] & 0x08) >> 3;
+      const chromaSubsamplingY = (av1CBox[2] & 0x04) >> 2;
+      const chromaSamplePosition = av1CBox[2] & 0x03;
+      // TODO: parse color_description_present_flag
+      // default it to BT.709/limited range for now
+      // more info https://aomediacodec.github.io/av1-isobmff/#av1codecconfigurationbox-syntax
+      const colorPrimaries = 1;
+      const transferCharacteristics = 1;
+      const matrixCoefficients = 1;
+      const videoFullRangeFlag = 0;
+      codec +=
+        '.' +
+        profile +
+        '.' +
+        addLeadingZero(level) +
+        tierFlag +
+        '.' +
+        addLeadingZero(bitDepth) +
+        '.' +
+        monochrome +
+        '.' +
+        chromaSubsamplingX +
+        chromaSubsamplingY +
+        chromaSamplePosition +
+        '.' +
+        addLeadingZero(colorPrimaries) +
+        '.' +
+        addLeadingZero(transferCharacteristics) +
+        '.' +
+        addLeadingZero(matrixCoefficients) +
+        '.' +
+        videoFullRangeFlag;
+      break;
+    }
+    case 'ac-3':
+    case 'ec-3':
+    case 'alac':
+    case 'fLaC':
+    case 'Opus':
+    default:
+      break;
+  }
+  return { codec, encrypted };
+}
+
+function skipBERInteger(bytes: Uint8Array, i: number): number {
+  const limit = i + 5;
+  while (bytes[i++] & 0x80 && i < limit) {}
+  return i;
+}
+
+function toHex(x: number): string {
+  return ('0' + x.toString(16).toUpperCase()).slice(-2);
+}
+
+function addLeadingZero(num: number): string {
+  return (num < 10 ? '0' : '') + num;
+}
+
+export function patchEncyptionData(
+  initSegment: Uint8Array | undefined,
+  decryptdata: DecryptData | null,
+): Uint8Array | undefined {
+  if (!initSegment || !decryptdata) {
+    return initSegment;
+  }
+  const keyId = decryptdata.keyId;
+  if (keyId && decryptdata.isCommonEncryption) {
+    const traks = findBox(initSegment, ['moov', 'trak']);
+    traks.forEach((trak) => {
+      const stsd = findBox(trak, ['mdia', 'minf', 'stbl', 'stsd'])[0];
+
+      // skip the sample entry count
+      const sampleEntries = stsd.subarray(8);
+      let encBoxes = findBox(sampleEntries, ['enca']);
+      const isAudio = encBoxes.length > 0;
+      if (!isAudio) {
+        encBoxes = findBox(sampleEntries, ['encv']);
+      }
+      encBoxes.forEach((enc) => {
+        const encBoxChildren = isAudio ? enc.subarray(28) : enc.subarray(78);
+        const sinfBoxes = findBox(encBoxChildren, ['sinf']);
+        sinfBoxes.forEach((sinf) => {
+          const tenc = parseSinf(sinf);
+          if (tenc) {
+            // Look for default key id (keyID offset is always 8 within the tenc box):
+            const tencKeyId = tenc.subarray(8, 24);
+            if (!tencKeyId.some((b) => b !== 0)) {
+              logger.log(
+                `[eme] Patching keyId in 'enc${
+                  isAudio ? 'a' : 'v'
+                }>sinf>>tenc' box: ${Hex.hexDump(tencKeyId)} -> ${Hex.hexDump(
+                  keyId,
+                )}`,
+              );
+              tenc.set(keyId, 8);
+            }
+          }
+        });
+      });
+    });
+  }
+
+  return initSegment;
+}
+
+export function parseSinf(sinf: Uint8Array): Uint8Array | null {
+  const schm = findBox(sinf, ['schm'])[0];
+  if (schm) {
+    const scheme = bin2str(schm.subarray(4, 8));
+    if (scheme === 'cbcs' || scheme === 'cenc') {
+      return findBox(sinf, ['schi', 'tenc'])[0];
+    }
+  }
+  logger.error(`[eme] missing 'schm' box`);
+  return null;
+}
+
 /**
  * Determine the base media decode start time, in seconds, for an MP4
  * fragment. If multiple fragments are specified, the earliest time is
@@ -284,15 +561,18 @@ export function parseInitSegment(initSegment: Uint8Array): InitData {
  * ```
  * It requires the timescale value from the mdhd to interpret.
  *
- * @param initData {InitData} a hash of track type to timescale values
- * @param fmp4 {Uint8Array} the bytes of the mp4 fragment
- * @return {number} the earliest base media decode start time for the
+ * @param initData - a hash of track type to timescale values
+ * @param fmp4 - the bytes of the mp4 fragment
+ * @returns the earliest base media decode start time for the
  * fragment, in seconds
  */
-export function getStartDTS(initData: InitData, fmp4: Uint8Array): number {
+export function getStartDTS(
+  initData: InitData,
+  fmp4: Uint8Array,
+): number | null {
   // we need info from two children of each track fragment box
-  return (
-    findBox(fmp4, ['moof', 'traf']).reduce((result: number | null, traf) => {
+  return findBox(fmp4, ['moof', 'traf']).reduce(
+    (result: number | null, traf) => {
       const tfdt = findBox(traf, ['tfdt'])[0];
       const version = tfdt[0];
       const start = findBox(traf, ['tfhd']).reduce(
@@ -303,7 +583,16 @@ export function getStartDTS(initData: InitData, fmp4: Uint8Array): number {
           if (track) {
             let baseTime = readUint32(tfdt, 4);
             if (version === 1) {
-              baseTime *= Math.pow(2, 32);
+              // If value is too large, assume signed 64-bit. Negative track fragment decode times are invalid, but they exist in the wild.
+              // This prevents large values from being used for initPTS, which can cause playlist sync issues.
+              // https://github.com/video-dev/hls.js/issues/5303
+              if (baseTime === UINT32_MAX) {
+                logger.warn(
+                  `[mp4-demuxer]: Ignoring assumed invalid signed 64-bit track fragment decode time`,
+                );
+                return result;
+              }
+              baseTime *= UINT32_MAX + 1;
               baseTime += readUint32(tfdt, 8);
             }
             // assume a 90kHz clock if no timescale was specified
@@ -311,7 +600,7 @@ export function getStartDTS(initData: InitData, fmp4: Uint8Array): number {
             // convert base time to seconds
             const startTime = baseTime / scale;
             if (
-              isFinite(startTime) &&
+              Number.isFinite(startTime) &&
               (result === null || startTime < result)
             ) {
               return startTime;
@@ -319,17 +608,18 @@ export function getStartDTS(initData: InitData, fmp4: Uint8Array): number {
           }
           return result;
         },
-        null
+        null,
       );
       if (
         start !== null &&
-        isFinite(start) &&
+        Number.isFinite(start) &&
         (result === null || start < result)
       ) {
         return start;
       }
       return result;
-    }, null) || 0
+    },
+    null,
   );
 }
 
@@ -396,19 +686,31 @@ export function getDuration(data: Uint8Array, initData: InitData) {
   }
   if (videoDuration === 0 && audioDuration === 0) {
     // If duration samples are not available in the traf use sidx subsegment_duration
+    let sidxMinStart = Infinity;
+    let sidxMaxEnd = 0;
     let sidxDuration = 0;
     const sidxs = findBox(data, ['sidx']);
     for (let i = 0; i < sidxs.length; i++) {
       const sidx = parseSegmentIndex(sidxs[i]);
       if (sidx?.references) {
-        sidxDuration += sidx.references.reduce(
-          (dur, ref) => dur + ref.info.duration || 0,
-          0
+        sidxMinStart = Math.min(
+          sidxMinStart,
+          sidx.earliestPresentationTime / sidx.timescale,
         );
+        const subSegmentDuration = sidx.references.reduce(
+          (dur, ref) => dur + ref.info.duration || 0,
+          0,
+        );
+        sidxMaxEnd = Math.max(
+          sidxMaxEnd,
+          subSegmentDuration + sidx.earliestPresentationTime / sidx.timescale,
+        );
+        sidxDuration = sidxMaxEnd - sidxMinStart;
       }
     }
-
-    return sidxDuration;
+    if (sidxDuration && Number.isFinite(sidxDuration)) {
+      return sidxDuration;
+    }
   }
   if (videoDuration) {
     return videoDuration;
@@ -478,7 +780,7 @@ export function computeRawDurationFromSamples(trun): number {
 export function offsetStartDTS(
   initData: InitData,
   fmp4: Uint8Array,
-  timeOffset: number
+  timeOffset: number,
 ) {
   findBox(fmp4, ['moof', 'traf']).forEach((traf) => {
     findBox(traf, ['tfhd']).forEach((tfhd) => {
@@ -493,21 +795,23 @@ export function offsetStartDTS(
       // get the base media decode time from the tfdt
       findBox(traf, ['tfdt']).forEach((tfdt) => {
         const version = tfdt[0];
-        let baseMediaDecodeTime = readUint32(tfdt, 4);
-
-        if (version === 0) {
-          baseMediaDecodeTime -= timeOffset * timescale;
-          baseMediaDecodeTime = Math.max(baseMediaDecodeTime, 0);
-          writeUint32(tfdt, 4, baseMediaDecodeTime);
-        } else {
-          baseMediaDecodeTime *= Math.pow(2, 32);
-          baseMediaDecodeTime += readUint32(tfdt, 8);
-          baseMediaDecodeTime -= timeOffset * timescale;
-          baseMediaDecodeTime = Math.max(baseMediaDecodeTime, 0);
-          const upper = Math.floor(baseMediaDecodeTime / (UINT32_MAX + 1));
-          const lower = Math.floor(baseMediaDecodeTime % (UINT32_MAX + 1));
-          writeUint32(tfdt, 4, upper);
-          writeUint32(tfdt, 8, lower);
+        const offset = timeOffset * timescale;
+        if (offset) {
+          let baseMediaDecodeTime = readUint32(tfdt, 4);
+          if (version === 0) {
+            baseMediaDecodeTime -= offset;
+            baseMediaDecodeTime = Math.max(baseMediaDecodeTime, 0);
+            writeUint32(tfdt, 4, baseMediaDecodeTime);
+          } else {
+            baseMediaDecodeTime *= Math.pow(2, 32);
+            baseMediaDecodeTime += readUint32(tfdt, 8);
+            baseMediaDecodeTime -= offset;
+            baseMediaDecodeTime = Math.max(baseMediaDecodeTime, 0);
+            const upper = Math.floor(baseMediaDecodeTime / (UINT32_MAX + 1));
+            const lower = Math.floor(baseMediaDecodeTime % (UINT32_MAX + 1));
+            writeUint32(tfdt, 4, upper);
+            writeUint32(tfdt, 8, lower);
+          }
         }
       });
     });
@@ -522,9 +826,7 @@ export function segmentValidRange(data: Uint8Array): SegmentedRange {
   };
 
   const moofs = findBox(data, ['moof']);
-  if (!moofs) {
-    return segmentedRange;
-  } else if (moofs.length < 2) {
+  if (moofs.length < 2) {
     segmentedRange.remainder = data;
     return segmentedRange;
   }
@@ -542,7 +844,7 @@ export interface SegmentedRange {
 
 export function appendUint8Array(
   data1: Uint8Array,
-  data2: Uint8Array
+  data2: Uint8Array,
 ): Uint8Array {
   const temp = new Uint8Array(data1.length + data2.length);
   temp.set(data1);
@@ -564,7 +866,7 @@ export interface IEmsgParsingData {
 
 export function parseSamples(
   timeOffset: number,
-  track: PassthroughTrack
+  track: PassthroughTrack,
 ): UserdataSample[] {
   const seiSamples = [] as UserdataSample[];
   const videoData = track.samples;
@@ -681,16 +983,16 @@ export function parseSamples(
                 while (naluTotalSize < sampleSize) {
                   const naluSize = readUint32(videoData, sampleOffset);
                   sampleOffset += 4;
-                  const naluType = videoData[sampleOffset] & 0x1f;
-                  if (isSEIMessage(isHEVCFlavor, naluType)) {
+                  if (isSEIMessage(isHEVCFlavor, videoData[sampleOffset])) {
                     const data = videoData.subarray(
                       sampleOffset,
-                      sampleOffset + naluSize
+                      sampleOffset + naluSize,
                     );
                     parseSEIMessageFromNALu(
                       data,
+                      isHEVCFlavor ? 2 : 1,
                       timeOffset + compositionOffset / timescale,
-                      seiSamples
+                      seiSamples,
                     );
                   }
                   sampleOffset += naluSize;
@@ -723,22 +1025,28 @@ function isHEVC(codec: string) {
   );
 }
 
-function isSEIMessage(isHEVCFlavor: boolean, naluType: number) {
-  return isHEVCFlavor ? naluType === 39 || naluType === 40 : naluType === 6;
+function isSEIMessage(isHEVCFlavor: boolean, naluHeader: number) {
+  if (isHEVCFlavor) {
+    const naluType = (naluHeader >> 1) & 0x3f;
+    return naluType === 39 || naluType === 40;
+  } else {
+    const naluType = naluHeader & 0x1f;
+    return naluType === 6;
+  }
 }
 
 export function parseSEIMessageFromNALu(
   unescapedData: Uint8Array,
+  headerSize: number,
   pts: number,
-  samples: UserdataSample[]
+  samples: UserdataSample[],
 ) {
   const data = discardEPB(unescapedData);
   let seiPtr = 0;
-  // skip frameType
-  seiPtr++;
+  // skip nal header
+  seiPtr += headerSize;
   let payloadType = 0;
   let payloadSize = 0;
-  let endOfCaptions = false;
   let b = 0;
 
   while (seiPtr < data.length) {
@@ -762,25 +1070,37 @@ export function parseSEIMessageFromNALu(
     } while (b === 0xff);
 
     const leftOver = data.length - seiPtr;
+    // Create a variable to process the payload
+    let payPtr = seiPtr;
 
-    if (!endOfCaptions && payloadType === 4 && seiPtr < data.length) {
-      endOfCaptions = true;
+    // Increment the seiPtr to the end of the payload
+    if (payloadSize < leftOver) {
+      seiPtr += payloadSize;
+    } else if (payloadSize > leftOver) {
+      // Some type of corruption has happened?
+      logger.error(
+        `Malformed SEI payload. ${payloadSize} is too small, only ${leftOver} bytes left to parse.`,
+      );
+      // We might be able to parse some data, but let's be safe and ignore it.
+      break;
+    }
 
-      const countryCode = data[seiPtr++];
+    if (payloadType === 4) {
+      const countryCode = data[payPtr++];
       if (countryCode === 181) {
-        const providerCode = readUint16(data, seiPtr);
-        seiPtr += 2;
+        const providerCode = readUint16(data, payPtr);
+        payPtr += 2;
 
         if (providerCode === 49) {
-          const userStructure = readUint32(data, seiPtr);
-          seiPtr += 4;
+          const userStructure = readUint32(data, payPtr);
+          payPtr += 4;
 
           if (userStructure === 0x47413934) {
-            const userDataType = data[seiPtr++];
+            const userDataType = data[payPtr++];
 
             // Raw CEA-608 bytes wrapped in CEA-708 packet
             if (userDataType === 3) {
-              const firstByte = data[seiPtr++];
+              const firstByte = data[payPtr++];
               const totalCCs = 0x1f & firstByte;
               const enabled = 0x40 & firstByte;
               const totalBytes = enabled ? 2 + totalCCs * 3 : 0;
@@ -788,7 +1108,7 @@ export function parseSEIMessageFromNALu(
               if (enabled) {
                 byteArray[0] = firstByte;
                 for (let i = 1; i < totalBytes; i++) {
-                  byteArray[i] = data[seiPtr++];
+                  byteArray[i] = data[payPtr++];
                 }
               }
 
@@ -802,13 +1122,11 @@ export function parseSEIMessageFromNALu(
           }
         }
       }
-    } else if (payloadType === 5 && payloadSize < leftOver) {
-      endOfCaptions = true;
-
+    } else if (payloadType === 5) {
       if (payloadSize > 16) {
         const uuidStrArray: Array<string> = [];
         for (let i = 0; i < 16; i++) {
-          const b = data[seiPtr++].toString(16);
+          const b = data[payPtr++].toString(16);
           uuidStrArray.push(b.length == 1 ? '0' + b : b);
 
           if (i === 3 || i === 5 || i === 7 || i === 9) {
@@ -818,7 +1136,7 @@ export function parseSEIMessageFromNALu(
         const length = payloadSize - 16;
         const userDataBytes = new Uint8Array(length);
         for (let i = 0; i < length; i++) {
-          userDataBytes[i] = data[seiPtr++];
+          userDataBytes[i] = data[payPtr++];
         }
 
         samples.push({
@@ -829,10 +1147,6 @@ export function parseSEIMessageFromNALu(
           userDataBytes,
         });
       }
-    } else if (payloadSize < leftOver) {
-      seiPtr += payloadSize;
-    } else if (payloadSize > leftOver) {
-      break;
     }
   }
 }
@@ -840,7 +1154,7 @@ export function parseSEIMessageFromNALu(
 /**
  * remove Emulation Prevention bytes from a RBSP
  */
-function discardEPB(data: Uint8Array): Uint8Array {
+export function discardEPB(data: Uint8Array): Uint8Array {
   const length = data.byteLength;
   const EPBPositions = [] as Array<number>;
   let i = 1;
@@ -922,9 +1236,8 @@ export function parseEmsg(data: Uint8Array): IEmsgParsingData {
     presentationTime = 2 ** 32 * leftPresentationTime + rightPresentationTime;
     if (!Number.isSafeInteger(presentationTime)) {
       presentationTime = Number.MAX_SAFE_INTEGER;
-      // eslint-disable-next-line no-console
-      console.warn(
-        'Presentation time exceeds safe integer limit and wrapped to max safe integer in parsing emsg box'
+      logger.warn(
+        'Presentation time exceeds safe integer limit and wrapped to max safe integer in parsing emsg box',
       );
     }
 
@@ -961,4 +1274,116 @@ export function parseEmsg(data: Uint8Array): IEmsgParsingData {
     id,
     payload,
   };
+}
+
+export function mp4Box(type: ArrayLike<number>, ...payload: Uint8Array[]) {
+  const len = payload.length;
+  let size = 8;
+  let i = len;
+  while (i--) {
+    size += payload[i].byteLength;
+  }
+  const result = new Uint8Array(size);
+  result[0] = (size >> 24) & 0xff;
+  result[1] = (size >> 16) & 0xff;
+  result[2] = (size >> 8) & 0xff;
+  result[3] = size & 0xff;
+  result.set(type, 4);
+  for (i = 0, size = 8; i < len; i++) {
+    result.set(payload[i], size);
+    size += payload[i].byteLength;
+  }
+  return result;
+}
+
+export function mp4pssh(
+  systemId: Uint8Array,
+  keyids: Array<Uint8Array> | null,
+  data: Uint8Array,
+) {
+  if (systemId.byteLength !== 16) {
+    throw new RangeError('Invalid system id');
+  }
+  let version;
+  let kids;
+  if (keyids) {
+    version = 1;
+    kids = new Uint8Array(keyids.length * 16);
+    for (let ix = 0; ix < keyids.length; ix++) {
+      const k = keyids[ix]; // uint8array
+      if (k.byteLength !== 16) {
+        throw new RangeError('Invalid key');
+      }
+      kids.set(k, ix * 16);
+    }
+  } else {
+    version = 0;
+    kids = new Uint8Array();
+  }
+  let kidCount;
+  if (version > 0) {
+    kidCount = new Uint8Array(4);
+    if (keyids!.length > 0) {
+      new DataView(kidCount.buffer).setUint32(0, keyids!.length, false);
+    }
+  } else {
+    kidCount = new Uint8Array();
+  }
+  const dataSize = new Uint8Array(4);
+  if (data && data.byteLength > 0) {
+    new DataView(dataSize.buffer).setUint32(0, data.byteLength, false);
+  }
+  return mp4Box(
+    [112, 115, 115, 104],
+    new Uint8Array([
+      version,
+      0x00,
+      0x00,
+      0x00, // Flags
+    ]),
+    systemId, // 16 bytes
+    kidCount,
+    kids,
+    dataSize,
+    data || new Uint8Array(),
+  );
+}
+
+export function parsePssh(initData: ArrayBuffer) {
+  if (!(initData instanceof ArrayBuffer) || initData.byteLength < 32) {
+    return null;
+  }
+  const result = {
+    version: 0,
+    systemId: '',
+    kids: null as null | Uint8Array[],
+    data: null as null | Uint8Array,
+  };
+  const view = new DataView(initData);
+  const boxSize = view.getUint32(0);
+  if (initData.byteLength !== boxSize && boxSize > 44) {
+    return null;
+  }
+  const type = view.getUint32(4);
+  if (type !== 0x70737368) {
+    return null;
+  }
+  result.version = view.getUint32(8) >>> 24;
+  if (result.version > 1) {
+    return null;
+  }
+  result.systemId = Hex.hexDump(new Uint8Array(initData, 12, 16));
+  const dataSizeOrKidCount = view.getUint32(28);
+  if (result.version === 0) {
+    if (boxSize - 32 < dataSizeOrKidCount) {
+      return null;
+    }
+    result.data = new Uint8Array(initData, 32, dataSizeOrKidCount);
+  } else if (result.version === 1) {
+    result.kids = [];
+    for (let i = 0; i < dataSizeOrKidCount; i++) {
+      result.kids.push(new Uint8Array(initData, 32 + i * 16, 16));
+    }
+  }
+  return result;
 }

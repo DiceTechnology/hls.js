@@ -15,7 +15,7 @@ import type {
 } from '../types/events';
 import type Hls from '../hls';
 
-export enum FragmentState {
+export const enum FragmentState {
   NOT_LOADED = 'NOT_LOADED',
   APPENDING = 'APPENDING',
   PARTIAL = 'PARTIAL',
@@ -23,18 +23,21 @@ export enum FragmentState {
 }
 
 export class FragmentTracker implements ComponentAPI {
-  private activeFragment: Fragment | null = null;
-  private activeParts: Part[] | null = null;
+  private activePartLists: { [key in PlaylistLevelType]?: Part[] } =
+    Object.create(null);
+  private endListFragments: { [key in PlaylistLevelType]?: FragmentEntity } =
+    Object.create(null);
   private fragments: Partial<Record<string, FragmentEntity>> =
     Object.create(null);
   private timeRanges:
     | {
-        [key in SourceBufferName]: TimeRanges;
+        [key in SourceBufferName]?: TimeRanges;
       }
     | null = Object.create(null);
 
   private bufferPadding: number = 0.2;
   private hls: Hls;
+  private hasGaps: boolean = false;
 
   constructor(hls: Hls) {
     this.hls = hls;
@@ -59,46 +62,38 @@ export class FragmentTracker implements ComponentAPI {
   public destroy() {
     this._unregisterListeners();
     // @ts-ignore
-    this.fragments = this.timeRanges = null;
+    this.fragments =
+      // @ts-ignore
+      this.activePartLists =
+      // @ts-ignore
+      this.endListFragments =
+      this.timeRanges =
+        null;
   }
 
   /**
-   * Return a Fragment with an appended range that matches the position and levelType.
-   * If not found any Fragment, return null
+   * Return a Fragment or Part with an appended range that matches the position and levelType
+   * Otherwise, return null
    */
   public getAppendedFrag(
     position: number,
-    levelType: PlaylistLevelType
+    levelType: PlaylistLevelType,
   ): Fragment | Part | null {
-    if (levelType === PlaylistLevelType.MAIN) {
-      const { activeFragment, activeParts } = this;
-      if (!activeFragment) {
-        return null;
-      }
-      if (activeParts) {
-        for (let i = activeParts.length; i--; ) {
-          const activePart = activeParts[i];
-          const appendedPTS = activePart
-            ? activePart.end
-            : activeFragment.appendedPTS;
-          if (
-            activePart.start <= position &&
-            appendedPTS !== undefined &&
-            position <= appendedPTS
-          ) {
-            // 9 is a magic number. remove parts from lookup after a match but keep some short seeks back.
-            if (i > 9) {
-              this.activeParts = activeParts.slice(i - 9);
-            }
-            return activePart;
-          }
+    const activeParts = this.activePartLists[levelType];
+    if (activeParts) {
+      for (let i = activeParts.length; i--; ) {
+        const activePart = activeParts[i];
+        if (!activePart) {
+          break;
         }
-      } else if (
-        activeFragment.start <= position &&
-        activeFragment.appendedPTS !== undefined &&
-        position <= activeFragment.appendedPTS
-      ) {
-        return activeFragment;
+        const appendedPTS = activePart.end;
+        if (
+          activePart.start <= position &&
+          appendedPTS !== null &&
+          position <= appendedPTS
+        ) {
+          return activePart;
+        }
       }
     }
     return this.getBufferedFrag(position, levelType);
@@ -111,7 +106,7 @@ export class FragmentTracker implements ComponentAPI {
    */
   public getBufferedFrag(
     position: number,
-    levelType: PlaylistLevelType
+    levelType: PlaylistLevelType,
   ): Fragment | null {
     const { fragments } = this;
     const keys = Object.keys(fragments);
@@ -135,15 +130,24 @@ export class FragmentTracker implements ComponentAPI {
   public detectEvictedFragments(
     elementaryStream: SourceBufferName,
     timeRange: TimeRanges,
-    playlistType?: PlaylistLevelType
+    playlistType: PlaylistLevelType,
+    appendedPart?: Part | null,
   ) {
+    if (this.timeRanges) {
+      this.timeRanges[elementaryStream] = timeRange;
+    }
     // Check if any flagged fragments have been unloaded
+    // excluding anything newer than appendedPartSn
+    const appendedPartSn = (appendedPart?.fragment.sn || -1) as number;
     Object.keys(this.fragments).forEach((key) => {
       const fragmentEntity = this.fragments[key];
       if (!fragmentEntity) {
         return;
       }
-      if (!fragmentEntity.buffered) {
+      if (appendedPartSn >= (fragmentEntity.body.sn as number)) {
+        return;
+      }
+      if (!fragmentEntity.buffered && !fragmentEntity.loaded) {
         if (fragmentEntity.body.type === playlistType) {
           this.removeFragment(fragmentEntity.body);
         }
@@ -157,7 +161,7 @@ export class FragmentTracker implements ComponentAPI {
         const isNotBuffered = !this.isTimeBuffered(
           time.startPTS,
           time.endPTS,
-          timeRange
+          timeRange,
         );
         if (isNotBuffered) {
           // Unregister partial fragment as it needs to load again to be reused
@@ -172,7 +176,7 @@ export class FragmentTracker implements ComponentAPI {
    * Checks if the fragment passed in is loaded in the buffer properly
    * Partially loaded fragments will be registered as a partial fragment
    */
-  private detectPartialFragments(data: FragBufferedData) {
+  public detectPartialFragments(data: FragBufferedData) {
     const timeRanges = this.timeRanges;
     const { frag, part } = data;
     if (!timeRanges || frag.sn === 'initSegment') {
@@ -181,35 +185,67 @@ export class FragmentTracker implements ComponentAPI {
 
     const fragKey = getFragmentKey(frag);
     const fragmentEntity = this.fragments[fragKey];
-    if (!fragmentEntity) {
+    if (!fragmentEntity || (fragmentEntity.buffered && frag.gap)) {
       return;
     }
-    Object.keys(timeRanges).forEach((elementaryStream) => {
+    const isFragHint = !frag.relurl;
+    Object.keys(timeRanges).forEach((elementaryStream: SourceBufferName) => {
       const streamInfo = frag.elementaryStreams[elementaryStream];
       if (!streamInfo) {
         return;
       }
-      const timeRange = timeRanges[elementaryStream];
-      const partial = part !== null || streamInfo.partial === true;
+      const timeRange = timeRanges[elementaryStream] as TimeRanges;
+      const partial = isFragHint || streamInfo.partial === true;
       fragmentEntity.range[elementaryStream] = this.getBufferedTimes(
         frag,
         part,
         partial,
-        timeRange
+        timeRange,
       );
     });
     fragmentEntity.loaded = null;
     if (Object.keys(fragmentEntity.range).length) {
       fragmentEntity.buffered = true;
+      const endList = (fragmentEntity.body.endList =
+        frag.endList || fragmentEntity.body.endList);
+      if (endList) {
+        this.endListFragments[fragmentEntity.body.type] = fragmentEntity;
+      }
+      if (!isPartial(fragmentEntity)) {
+        // Remove older fragment parts from lookup after frag is tracked as buffered
+        this.removeParts((frag.sn as number) - 1, frag.type);
+      }
     } else {
       // remove fragment if nothing was appended
       this.removeFragment(fragmentEntity.body);
     }
   }
 
-  public fragBuffered(frag: Fragment) {
+  private removeParts(snToKeep: number, levelType: PlaylistLevelType) {
+    const activeParts = this.activePartLists[levelType];
+    if (!activeParts) {
+      return;
+    }
+    this.activePartLists[levelType] = activeParts.filter(
+      (part) => (part.fragment.sn as number) >= snToKeep,
+    );
+  }
+
+  public fragBuffered(frag: Fragment, force?: true) {
     const fragKey = getFragmentKey(frag);
-    const fragmentEntity = this.fragments[fragKey];
+    let fragmentEntity = this.fragments[fragKey];
+    if (!fragmentEntity && force) {
+      fragmentEntity = this.fragments[fragKey] = {
+        body: frag,
+        appendedPTS: null,
+        loaded: null,
+        buffered: false,
+        range: Object.create(null),
+      };
+      if (frag.gap) {
+        this.hasGaps = true;
+      }
+    }
     if (fragmentEntity) {
       fragmentEntity.loaded = null;
       fragmentEntity.buffered = true;
@@ -220,14 +256,14 @@ export class FragmentTracker implements ComponentAPI {
     fragment: Fragment,
     part: Part | null,
     partial: boolean,
-    timeRange: TimeRanges
+    timeRange: TimeRanges,
   ): FragmentBufferedRange {
     const buffered: FragmentBufferedRange = {
       time: [],
       partial,
     };
-    const startPTS = part ? part.start : fragment.start;
-    const endPTS = part ? part.end : fragment.end;
+    const startPTS = fragment.start;
+    const endPTS = fragment.end;
     const minEndPTS = fragment.minEndPTS || endPTS;
     const maxStartPTS = fragment.maxStartPTS || startPTS;
     for (let i = 0; i < timeRange.length; i++) {
@@ -242,13 +278,17 @@ export class FragmentTracker implements ComponentAPI {
         });
         break;
       } else if (startPTS < endTime && endPTS > startTime) {
-        buffered.partial = true;
-        // Check for intersection with buffer
-        // Get playable sections of the fragment
-        buffered.time.push({
-          startPTS: Math.max(startPTS, timeRange.start(i)),
-          endPTS: Math.min(endPTS, timeRange.end(i)),
-        });
+        const start = Math.max(startPTS, timeRange.start(i));
+        const end = Math.min(endPTS, timeRange.end(i));
+        if (end > start) {
+          buffered.partial = true;
+          // Check for intersection with buffer
+          // Get playable sections of the fragment
+          buffered.time.push({
+            startPTS: start,
+            endPTS: end,
+          });
+        }
       } else if (endPTS <= startTime) {
         // No need to check the rest of the timeRange as it is in order
         break;
@@ -288,6 +328,14 @@ export class FragmentTracker implements ComponentAPI {
     return bestFragment;
   }
 
+  public isEndListAppended(type: PlaylistLevelType): boolean {
+    const lastFragmentEntity = this.endListFragments[type];
+    return (
+      lastFragmentEntity !== undefined &&
+      (lastFragmentEntity.buffered || isPartial(lastFragmentEntity))
+    );
+  }
+
   public getState(fragment: Fragment): FragmentState {
     const fragKey = getFragmentKey(fragment);
     const fragmentEntity = this.fragments[fragKey];
@@ -308,7 +356,7 @@ export class FragmentTracker implements ComponentAPI {
   private isTimeBuffered(
     startPTS: number,
     endPTS: number,
-    timeRange: TimeRanges
+    timeRange: TimeRanges,
   ): boolean {
     let startTime;
     let endTime;
@@ -332,15 +380,18 @@ export class FragmentTracker implements ComponentAPI {
     const { frag, part } = data;
     // don't track initsegment (for which sn is not a number)
     // don't track frags used for bitrateTest, they're irrelevant.
-    // don't track parts for memory efficiency
-    if (frag.sn === 'initSegment' || frag.bitrateTest || part) {
+    if (frag.sn === 'initSegment' || frag.bitrateTest) {
       return;
     }
+
+    // Fragment entity `loaded` FragLoadedData is null when loading parts
+    const loaded = part ? null : data;
 
     const fragKey = getFragmentKey(frag);
     this.fragments[fragKey] = {
       body: frag,
-      loaded: data,
+      appendedPTS: null,
+      loaded,
       buffered: false,
       range: Object.create(null),
     };
@@ -348,31 +399,30 @@ export class FragmentTracker implements ComponentAPI {
 
   private onBufferAppended(
     event: Events.BUFFER_APPENDED,
-    data: BufferAppendedData
+    data: BufferAppendedData,
   ) {
     const { frag, part, timeRanges } = data;
-    if (frag.type === PlaylistLevelType.MAIN) {
-      this.activeFragment = frag;
-      if (part) {
-        let activeParts = this.activeParts;
-        if (!activeParts) {
-          this.activeParts = activeParts = [];
-        }
-        activeParts.push(part);
-      } else {
-        this.activeParts = null;
+    if (frag.sn === 'initSegment') {
+      return;
+    }
+    const playlistType = frag.type;
+    if (part) {
+      let activeParts = this.activePartLists[playlistType];
+      if (!activeParts) {
+        this.activePartLists[playlistType] = activeParts = [];
       }
+      activeParts.push(part);
     }
     // Store the latest timeRanges loaded in the buffer
-    this.timeRanges = timeRanges as { [key in SourceBufferName]: TimeRanges };
+    this.timeRanges = timeRanges;
     Object.keys(timeRanges).forEach((elementaryStream: SourceBufferName) => {
       const timeRange = timeRanges[elementaryStream] as TimeRanges;
-      this.detectEvictedFragments(elementaryStream, timeRange);
-      if (!part) {
-        for (let i = 0; i < timeRange.length; i++) {
-          frag.appendedPTS = Math.max(timeRange.end(i), frag.appendedPTS || 0);
-        }
-      }
+      this.detectEvictedFragments(
+        elementaryStream,
+        timeRange,
+        playlistType,
+        part,
+      );
     });
   }
 
@@ -385,25 +435,35 @@ export class FragmentTracker implements ComponentAPI {
     return !!this.fragments[fragKey];
   }
 
+  public hasParts(type: PlaylistLevelType): boolean {
+    return !!this.activePartLists[type]?.length;
+  }
+
   public removeFragmentsInRange(
     start: number,
     end: number,
-    playlistType: PlaylistLevelType
+    playlistType: PlaylistLevelType,
+    withGapOnly?: boolean,
+    unbufferedOnly?: boolean,
   ) {
+    if (withGapOnly && !this.hasGaps) {
+      return;
+    }
     Object.keys(this.fragments).forEach((key) => {
       const fragmentEntity = this.fragments[key];
       if (!fragmentEntity) {
         return;
       }
-      if (fragmentEntity.buffered) {
-        const frag = fragmentEntity.body;
-        if (
-          frag.type === playlistType &&
-          frag.start < end &&
-          frag.end > start
-        ) {
-          this.removeFragment(frag);
-        }
+      const frag = fragmentEntity.body;
+      if (frag.type !== playlistType || (withGapOnly && !frag.gap)) {
+        return;
+      }
+      if (
+        frag.start < end &&
+        frag.end > start &&
+        (fragmentEntity.buffered || unbufferedOnly)
+      ) {
+        this.removeFragment(frag);
       }
     });
   }
@@ -412,23 +472,37 @@ export class FragmentTracker implements ComponentAPI {
     const fragKey = getFragmentKey(fragment);
     fragment.stats.loaded = 0;
     fragment.clearElementaryStreamInfo();
+    const activeParts = this.activePartLists[fragment.type];
+    if (activeParts) {
+      const snToRemove = fragment.sn;
+      this.activePartLists[fragment.type] = activeParts.filter(
+        (part) => part.fragment.sn !== snToRemove,
+      );
+    }
     delete this.fragments[fragKey];
+    if (fragment.endList) {
+      delete this.endListFragments[fragment.type];
+    }
   }
 
   public removeAllFragments() {
     this.fragments = Object.create(null);
-    this.activeFragment = null;
-    this.activeParts = null;
+    this.endListFragments = Object.create(null);
+    this.activePartLists = Object.create(null);
+    this.hasGaps = false;
   }
 }
 
 function isPartial(fragmentEntity: FragmentEntity): boolean {
   return (
     fragmentEntity.buffered &&
-    (fragmentEntity.range.video?.partial || fragmentEntity.range.audio?.partial)
+    (fragmentEntity.body.gap ||
+      fragmentEntity.range.video?.partial ||
+      fragmentEntity.range.audio?.partial ||
+      fragmentEntity.range.audiovideo?.partial)
   );
 }
 
 function getFragmentKey(fragment: Fragment): string {
-  return `${fragment.type}_${fragment.level}_${fragment.urlId}_${fragment.sn}`;
+  return `${fragment.type}_${fragment.level}_${fragment.sn}`;
 }

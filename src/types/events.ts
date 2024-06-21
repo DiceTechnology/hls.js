@@ -3,7 +3,14 @@ import type { Fragment } from '../loader/fragment';
 // eslint-disable-next-line import/no-duplicates
 import type { Part } from '../loader/fragment';
 import type { LevelDetails } from '../loader/level-details';
-import type { HlsUrlParameters, Level, LevelParsed } from './level';
+import type {
+  HdcpLevel,
+  HlsUrlParameters,
+  Level,
+  LevelAttributes,
+  LevelParsed,
+  VariableMap,
+} from './level';
 import type { MediaPlaylist, MediaPlaylistType } from './media-playlist';
 import type {
   Loader,
@@ -21,6 +28,10 @@ import type { ErrorDetails, ErrorTypes } from '../errors';
 import type { MetadataSample, UserdataSample } from './demuxer';
 import type { AttrList } from '../utils/attr-list';
 import type { HlsListeners } from '../events';
+import type { KeyLoaderInfo } from '../loader/key-loader';
+import type { LevelKey } from '../loader/level-key';
+import type { IErrorAction } from '../controller/error-controller';
+import type { SteeringManifest } from '../controller/content-steering-controller';
 
 export interface MediaAttachingData {
   media: HTMLMediaElement;
@@ -28,6 +39,7 @@ export interface MediaAttachingData {
 
 export interface MediaAttachedData {
   media: HTMLMediaElement;
+  mediaSource?: MediaSource;
 }
 
 export interface BufferCodecsData {
@@ -76,21 +88,32 @@ export interface ManifestLoadingData {
   url: string;
 }
 
+export type ContentSteeringOptions = {
+  uri: string;
+  pathwayId: string;
+};
+
 export interface ManifestLoadedData {
   audioTracks: MediaPlaylist[];
   captions?: MediaPlaylist[];
+  contentSteering: ContentSteeringOptions | null;
   levels: LevelParsed[];
   networkDetails: any;
   sessionData: Record<string, AttrList> | null;
+  sessionKeys: LevelKey[] | null;
+  startTimeOffset: number | null;
   stats: LoaderStats;
   subtitles?: MediaPlaylist[];
   url: string;
+  variableList: VariableMap | null;
 }
 
 export interface ManifestParsedData {
   levels: Level[];
   audioTracks: MediaPlaylist[];
   subtitleTracks: MediaPlaylist[];
+  sessionData: Record<string, AttrList> | null;
+  sessionKeys: LevelKey[] | null;
   firstLevel: number;
   stats: LoaderStats;
   audio: boolean;
@@ -98,8 +121,32 @@ export interface ManifestParsedData {
   altAudio: boolean;
 }
 
-export interface LevelSwitchingData extends Omit<Level, '_urlId'> {
+export interface LevelSwitchingData {
   level: number;
+  attrs: LevelAttributes;
+  details: LevelDetails | undefined;
+  bitrate: number;
+  averageBitrate: number;
+  maxBitrate: number;
+  realBitrate: number;
+  width: number;
+  height: number;
+  codecSet: string;
+  audioCodec: string | undefined;
+  videoCodec: string | undefined;
+  audioGroups: (string | undefined)[] | undefined;
+  subtitleGroups: (string | undefined)[] | undefined;
+  loaded: { bytes: number; duration: number } | undefined;
+  loadError: number;
+  fragmentError: number;
+  name: string | undefined;
+  id: number;
+  uri: string;
+  // Deprecated (retained for backwards compatibility)
+  url: string[];
+  urlId: 0;
+  audioGroupIds: (string | undefined)[] | undefined;
+  textGroupIds: (string | undefined)[] | undefined;
 }
 
 export interface LevelSwitchedData {
@@ -116,6 +163,7 @@ export interface TrackLoadingData {
 export interface LevelLoadingData {
   id: number;
   level: number;
+  pathwayId: string | undefined;
   url: string;
   deliveryDirectives: HlsUrlParameters | null;
 }
@@ -153,17 +201,9 @@ export interface LevelPTSUpdatedData {
   end: number;
 }
 
-export interface AudioTrackSwitchingData {
-  id: number;
-  name: string;
-  groupId: string;
-  type: MediaPlaylistType | 'main';
-  url: string;
-}
+export interface AudioTrackSwitchingData extends MediaPlaylist {}
 
-export interface AudioTrackSwitchedData {
-  id: number;
-}
+export interface AudioTrackSwitchedData extends MediaPlaylist {}
 
 export interface AudioTrackLoadedData extends TrackLoadedData {}
 
@@ -209,25 +249,41 @@ export interface FPSDropLevelCappingData {
   level: number;
 }
 
+export interface MaxAutoLevelUpdatedData {
+  autoLevelCapping: number;
+  levels: Level[] | null;
+  maxAutoLevel: number;
+  minAutoLevel: number;
+  maxHdcpLevel: HdcpLevel;
+}
+
 export interface ErrorData {
   type: ErrorTypes;
   details: ErrorDetails;
+  error: Error;
   fatal: boolean;
+  errorAction?: IErrorAction;
   buffer?: number;
   bytes?: number;
+  chunkMeta?: ChunkMetadata;
   context?: PlaylistLoaderContext;
-  error?: Error;
   event?: keyof HlsListeners | 'demuxerWorker';
   frag?: Fragment;
+  part?: Part | null;
   level?: number | undefined;
   levelRetry?: boolean;
   loader?: Loader<LoaderContext>;
   networkDetails?: any;
+  stats?: LoaderStats;
   mimeType?: string;
   reason?: string;
   response?: LoaderResponse;
   url?: string;
   parent?: PlaylistLevelType;
+  sourceBufferName?: SourceBufferName;
+  /**
+   * @deprecated Use ErrorData.error
+   */
   err?: {
     // comes from transmuxer interface
     message: string;
@@ -338,6 +394,7 @@ export interface KeyLoadingData {
 
 export interface KeyLoadedData {
   frag: Fragment;
+  keyInfo: KeyLoaderInfo;
 }
 
 export interface BackBufferData {
@@ -345,6 +402,11 @@ export interface BackBufferData {
 }
 
 /**
- * Deprecated; please use BackBufferData
+ * @deprecated Use BackBufferData
  */
 export interface LiveBackBufferData extends BackBufferData {}
+
+export interface SteeringManifestLoadedData {
+  steeringManifest: SteeringManifest;
+  url: string;
+}

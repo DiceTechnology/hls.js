@@ -1,6 +1,9 @@
 import { VTTParser } from './vttparser';
 import { utf8ArrayToStr } from '../demux/id3';
-import { toMpegTsClockFromTimescale } from './timescale-conversion';
+import {
+  RationalTimestamp,
+  toMpegTsClockFromTimescale,
+} from './timescale-conversion';
 import { normalizePts } from '../remux/mp4-remuxer';
 import type { VTTCCs } from '../types/vtt';
 
@@ -10,7 +13,7 @@ const LINEBREAKS = /\r\n|\n\r|\n|\r/g;
 const startsWith = function (
   inputString: string,
   searchString: string,
-  position: number = 0
+  position: number = 0,
 ) {
   return (
     inputString.slice(position, position + searchString.length) === searchString
@@ -58,7 +61,7 @@ const hash = function (text: string) {
 export function generateCueId(
   startTime: number,
   endTime: number,
-  text: string
+  text: string,
 ) {
   return hash(startTime.toString()) + hash(endTime.toString()) + hash(text);
 }
@@ -89,13 +92,12 @@ const calculateOffset = function (vttCCs: VTTCCs, cc, presentationTime) {
 
 export function parseWebVTT(
   vttByteArray: ArrayBuffer,
-  initPTS: number,
-  timescale: number,
+  initPTS: RationalTimestamp | undefined,
   vttCCs: VTTCCs,
   cc: number,
   timeOffset: number,
   callBack: (cues: VTTCue[]) => void,
-  errorCallBack: (error: Error) => void
+  errorCallBack: (error: Error) => void,
 ) {
   const parser = new VTTParser();
   // Convert byteArray into string, replacing any somewhat exotic linefeeds with "\n", then split on that character.
@@ -105,7 +107,9 @@ export function parseWebVTT(
     .replace(LINEBREAKS, '\n')
     .split('\n');
   const cues: VTTCue[] = [];
-  const initPTS90Hz = toMpegTsClockFromTimescale(initPTS, timescale);
+  const init90kHz = initPTS
+    ? toMpegTsClockFromTimescale(initPTS.baseTime, initPTS.timescale)
+    : 0;
   let cueTime = '00:00.000';
   let timestampMapMPEGTS = 0;
   let timestampMapLOCAL = 0;
@@ -118,7 +122,7 @@ export function parseWebVTT(
     let cueOffset = vttCCs.ccOffset;
 
     // Calculate subtitle PTS offset
-    const webVttMpegTsMapOffset = (timestampMapMPEGTS - initPTS90Hz) / 90000;
+    const webVttMpegTsMapOffset = (timestampMapMPEGTS - init90kHz) / 90000;
 
     // Update offsets for new discontinuities
     if (currCC?.new) {
@@ -129,8 +133,11 @@ export function parseWebVTT(
         calculateOffset(vttCCs, cc, webVttMpegTsMapOffset);
       }
     }
-
     if (webVttMpegTsMapOffset) {
+      if (!initPTS) {
+        parsingError = new Error('Missing initPTS for VTT MPEGTS');
+        return;
+      }
       // If we have MPEGTS, offset = presentation time + discontinuity offset
       cueOffset = webVttMpegTsMapOffset - vttCCs.presentationOffset;
     }
@@ -139,7 +146,7 @@ export function parseWebVTT(
     const startTime =
       normalizePts(
         (cue.startTime + cueOffset - timestampMapLOCAL) * 90000,
-        timeOffset * 90000
+        timeOffset * 90000,
       ) / 90000;
     cue.startTime = Math.max(startTime, 0);
     cue.endTime = Math.max(startTime + duration, 0);

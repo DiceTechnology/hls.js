@@ -5,16 +5,21 @@ import { Fragment } from '../../../src/loader/fragment';
 import { PlaylistLevelType } from '../../../src/types/loader';
 import Hls from '../../../src/hls';
 
-import * as sinon from 'sinon';
-import * as chai from 'chai';
-import * as sinonChai from 'sinon-chai';
+import sinon from 'sinon';
+import chai from 'chai';
+import sinonChai from 'sinon-chai';
 import { logger } from '../../../src/utils/logger';
 
 chai.use(sinonChai);
 const expect = chai.expect;
 describe('TransmuxerInterface tests', function () {
+  let hls;
+
   afterEach(function () {
     sinon.restore();
+    if (hls) {
+      hls.destroy();
+    }
   });
 
   const onTransmuxComplete = (res: TransmuxerResult) => {};
@@ -22,89 +27,95 @@ describe('TransmuxerInterface tests', function () {
 
   it('can construct without a worker', function () {
     const config = { enableWorker: false }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const id = PlaylistLevelType.MAIN;
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       id,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     ) as any;
     expect(transmuxerInterface.hls).to.equal(hls, 'Hls object created');
     expect(transmuxerInterface.id).to.equal(id, 'Id has been set up');
     expect(transmuxerInterface.observer.emit, 'emit exists').to.exist;
     expect(transmuxerInterface.observer.off, 'off exists').to.exist;
-    expect(transmuxerInterface.worker, 'worker is null').to.not.exist;
+    expect(transmuxerInterface.workerContext, 'workerContext is null').to.not
+      .exist;
   });
 
   it('can construct with a worker', function () {
     const config = { enableWorker: true }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const id = PlaylistLevelType.MAIN;
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       id,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     ) as any;
     expect(transmuxerInterface.hls).to.equal(hls, 'Hls object created');
     expect(transmuxerInterface.id).to.equal(id, 'Id has been set up');
     expect(transmuxerInterface.observer.emit, 'emit exists').to.exist;
     expect(transmuxerInterface.observer.off, 'off exists').to.exist;
-    expect(transmuxerInterface.worker, 'worker exists').to.exist;
+    expect(transmuxerInterface.workerContext, 'workerContext exists').to.exist;
   });
 
   it('can destroy a transmuxer worker', function () {
     const config = { enableWorker: true }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const id = PlaylistLevelType.MAIN;
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       id,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     );
     const transmuxerInterfacePrivates = transmuxerInterface as any;
     transmuxerInterface.destroy();
     expect(transmuxerInterfacePrivates.observer, 'observer').to.not.exist;
     expect(transmuxerInterfacePrivates.transmuxer, 'transmuxer').to.not.exist;
-    expect(transmuxerInterfacePrivates.worker, 'worker').to.not.exist;
+    expect(transmuxerInterfacePrivates.workerContext, 'workerContext').to.not
+      .exist;
   });
 
   it('can destroy an inline transmuxer', function () {
     const config = { enableWorker: false }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const id = PlaylistLevelType.MAIN;
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       id,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     );
     const transmuxerInterfacePrivates = transmuxerInterface as any;
     transmuxerInterface.destroy();
     expect(transmuxerInterfacePrivates.observer, 'observer').to.not.exist;
     expect(transmuxerInterfacePrivates.transmuxer, 'transmuxer').to.not.exist;
-    expect(transmuxerInterfacePrivates.worker, 'worker').to.not.exist;
+    expect(transmuxerInterfacePrivates.workerContext, 'workerContext').to.not
+      .exist;
   });
 
   it('pushes data to a transmuxer worker', function () {
     const config = { enableWorker: true }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const id = PlaylistLevelType.MAIN;
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       id,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     );
     const transmuxerInterfacePrivates = transmuxerInterface as any;
-    const stub = sinon.stub(transmuxerInterfacePrivates.worker, 'postMessage');
+    const stub = sinon.stub(
+      transmuxerInterfacePrivates.workerContext.worker,
+      'postMessage',
+    );
     const currentFrag = new Fragment(PlaylistLevelType.MAIN, '');
     currentFrag.cc = 100;
     currentFrag.sn = 5;
@@ -130,14 +141,14 @@ describe('TransmuxerInterface tests', function () {
       part,
       duration,
       accurateTimeOffset,
-      chunkMeta
+      chunkMeta,
     );
 
     expect(stub).to.have.been.calledOnce;
     const firstCall = stub.args[0][0];
     expect(
       firstCall,
-      'Demux call 1: ' + JSON.stringify(firstCall, null, 2)
+      'Demux call 1: ' + JSON.stringify(firstCall, null, 2),
     ).to.deep.equal({
       cmd: 'demux',
       data,
@@ -163,14 +174,14 @@ describe('TransmuxerInterface tests', function () {
       part,
       duration,
       accurateTimeOffset,
-      chunkMeta
+      chunkMeta,
     );
 
     expect(stub).to.have.been.calledTwice;
     const secondCall = stub.args[1][0];
     expect(
       secondCall,
-      'Demux call 2: ' + JSON.stringify(secondCall, null, 2)
+      'Demux call 2: ' + JSON.stringify(secondCall, null, 2),
     ).to.deep.equal({
       cmd: 'demux',
       data,
@@ -182,14 +193,14 @@ describe('TransmuxerInterface tests', function () {
 
   it('pushes data to demuxer with no worker', function () {
     const config = { enableWorker: false }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const id = PlaylistLevelType.MAIN;
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       id,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     );
     const transmuxerInterfacePrivates = transmuxerInterface as any;
 
@@ -217,7 +228,7 @@ describe('TransmuxerInterface tests', function () {
 
     const configureStub = sinon.stub(
       transmuxerInterfacePrivates.transmuxer,
-      'configure'
+      'configure',
     );
     const pushStub = sinon.stub(transmuxerInterfacePrivates.transmuxer, 'push');
     pushStub.returns(Promise.reject(new Error('Stubbed transmux result')));
@@ -230,7 +241,7 @@ describe('TransmuxerInterface tests', function () {
       part,
       duration,
       accurateTimeOffset,
-      chunkMeta
+      chunkMeta,
     );
 
     const tConfig = new TransmuxConfig('', '', initSegmentData, 0);
@@ -243,13 +254,13 @@ describe('TransmuxerInterface tests', function () {
       data,
       newFrag.decryptdata,
       chunkMeta,
-      state
+      state,
     );
   });
 
   it('sends worker generic message', function () {
     const config = { enableWorker: true }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     const triggerStub = sinon.stub(hls, 'trigger');
     triggerStub.callsFake(function (event, data) {
       expect(event).to.equal(evt.data.event);
@@ -262,7 +273,7 @@ describe('TransmuxerInterface tests', function () {
       hls,
       PlaylistLevelType.MAIN,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     );
     const transmuxerInterfacePrivates = transmuxerInterface as any;
     transmuxerInterfacePrivates.frag = {};
@@ -280,13 +291,13 @@ describe('TransmuxerInterface tests', function () {
 
   it('Handles the init event', function () {
     const config = { enableWorker: true }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       PlaylistLevelType.MAIN,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     );
     const transmuxerInterfacePrivates = transmuxerInterface as any;
     const evt = {
@@ -303,13 +314,13 @@ describe('TransmuxerInterface tests', function () {
 
   it('Handles logger events from the worker', function () {
     const config = { enableWorker: true }; // Option debug : true crashes mocha
-    const hls = new Hls(config);
+    hls = new Hls(config);
     sinon.stub(hls, 'trigger');
     const transmuxerInterface = new TransmuxerInterface(
       hls,
       PlaylistLevelType.MAIN,
       onTransmuxComplete,
-      onFlush
+      onFlush,
     );
     const transmuxerInterfacePrivates = transmuxerInterface as any;
     const evt = {

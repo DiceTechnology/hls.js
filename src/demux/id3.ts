@@ -6,9 +6,8 @@ export type Frame = DecodedFrame<ArrayBuffer | string>;
 
 /**
  * Returns true if an ID3 header can be found at offset in data
- * @param {Uint8Array} data - The data to search in
- * @param {number} offset - The offset at which to start searching
- * @return {boolean} - True if an ID3 header is found
+ * @param data - The data to search
+ * @param offset - The offset at which to start searching
  */
 export const isHeader = (data: Uint8Array, offset: number): boolean => {
   /*
@@ -51,9 +50,8 @@ export const isHeader = (data: Uint8Array, offset: number): boolean => {
 
 /**
  * Returns true if an ID3 footer can be found at offset in data
- * @param {Uint8Array} data - The data to search in
- * @param {number} offset - The offset at which to start searching
- * @return {boolean} - True if an ID3 footer is found
+ * @param data - The data to search
+ * @param offset - The offset at which to start searching
  */
 export const isFooter = (data: Uint8Array, offset: number): boolean => {
   /*
@@ -86,14 +84,14 @@ export const isFooter = (data: Uint8Array, offset: number): boolean => {
 
 /**
  * Returns any adjacent ID3 tags found in data starting at offset, as one block of data
- * @param {Uint8Array} data - The data to search in
- * @param {number} offset - The offset at which to start searching
- * @return {Uint8Array | undefined} - The block of data containing any ID3 tags found
+ * @param data - The data to search in
+ * @param offset - The offset at which to start searching
+ * @returns the block of data containing any ID3 tags found
  * or *undefined* if no header is found at the starting offset
  */
 export const getID3Data = (
   data: Uint8Array,
-  offset: number
+  offset: number,
 ): Uint8Array | undefined => {
   const front = offset;
   let length = 0;
@@ -138,8 +136,7 @@ export const canParse = (data: Uint8Array, offset: number): boolean => {
 
 /**
  * Searches for the Elementary Stream timestamp found in the ID3 data chunk
- * @param {Uint8Array} data - Block of data containing one or more ID3 tags
- * @return {number | undefined} - The timestamp
+ * @param data - Block of data containing one or more ID3 tags
  */
 export const getTimeStamp = (data: Uint8Array): number | undefined => {
   const frames: Frame[] = getID3Frames(data);
@@ -157,7 +154,6 @@ export const getTimeStamp = (data: Uint8Array): number | undefined => {
 
 /**
  * Returns true if the ID3 frame is an Elementary Stream timestamp frame
- * @param {ID3 frame} frame
  */
 export const isTimeStampFrame = (frame: Frame): boolean => {
   return (
@@ -184,8 +180,7 @@ const getFrameData = (data: Uint8Array): RawFrame => {
 
 /**
  * Returns an array of ID3 frames found in all the ID3 tags in the id3Data
- * @param {Uint8Array} id3Data - The ID3 data containing one or more ID3 tags
- * @return {ID3.Frame[]} - Array of ID3 frame objects
+ * @param id3Data - The ID3 data containing one or more ID3 tags
  */
 export const getID3Frames = (id3Data: Uint8Array): Frame[] => {
   let offset = 0;
@@ -227,7 +222,7 @@ export const decodeFrame = (frame: RawFrame): Frame | undefined => {
 };
 
 const decodePrivFrame = (
-  frame: RawFrame
+  frame: RawFrame,
 ): DecodedFrame<ArrayBuffer> | undefined => {
   /*
   Format: <text string>\0<binary data>
@@ -284,7 +279,7 @@ const decodeURLFrame = (frame: RawFrame): DecodedFrame<string> | undefined => {
     let index = 1;
     const description: string = utf8ArrayToStr(
       frame.data.subarray(index),
-      true
+      true,
     );
 
     index += description.length + 1;
@@ -301,7 +296,7 @@ const decodeURLFrame = (frame: RawFrame): DecodedFrame<string> | undefined => {
 };
 
 const readTimeStamp = (
-  timeStampFrame: DecodedFrame<ArrayBuffer>
+  timeStampFrame: DecodedFrame<ArrayBuffer>,
 ): number | undefined => {
   if (timeStampFrame.data.byteLength === 8) {
     const data = new Uint8Array(timeStampFrame.data);
@@ -333,7 +328,7 @@ const readTimeStamp = (
  */
 export const utf8ArrayToStr = (
   array: Uint8Array,
-  exitOnNull: boolean = false
+  exitOnNull: boolean = false,
 ): string => {
   const decoder = getTextDecoder();
   if (decoder) {
@@ -386,7 +381,7 @@ export const utf8ArrayToStr = (
         char2 = array[i++];
         char3 = array[i++];
         out += String.fromCharCode(
-          ((c & 0x0f) << 12) | ((char2 & 0x3f) << 6) | ((char3 & 0x3f) << 0)
+          ((c & 0x0f) << 12) | ((char2 & 0x3f) << 6) | ((char3 & 0x3f) << 0),
         );
         break;
       default:
@@ -402,6 +397,12 @@ export const testables = {
 let decoder: TextDecoder;
 
 function getTextDecoder() {
+  // On Play Station 4, TextDecoder is defined but partially implemented.
+  // Manual decoding option is preferable
+  if (navigator.userAgent.includes('PlayStation 4')) {
+    return;
+  }
+
   if (!decoder && typeof self.TextDecoder !== 'undefined') {
     decoder = new self.TextDecoder('utf-8');
   }

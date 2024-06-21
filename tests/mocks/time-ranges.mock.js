@@ -1,7 +1,7 @@
 const assertValidRange = (name, length, index) => {
   if (index >= length || index < 0) {
     throw new DOMException(
-      `Failed to execute '${name}' on 'TimeRanges': The index provided (${index}) is greater than the maximum bound (${length}).`
+      `Failed to execute '${name}' on 'TimeRanges': The index provided (${index}) is greater than the maximum bound (${length}).`,
     );
   }
   return true;
@@ -13,7 +13,7 @@ export class TimeRangesMock {
   // Accepts an argument list of [start, end] tuples or { start: number, end: number } objects
   constructor(...ranges) {
     this._ranges = ranges.map((range) =>
-      Array.isArray(range) ? range : [range.start, range.end]
+      Array.isArray(range) ? range : [range.start, range.end],
     );
   }
 
@@ -25,12 +25,12 @@ export class TimeRangesMock {
   start(i) {
     const { _ranges: ranges, length } = this;
     assertValidRange('start', length, i);
-    return ranges[i] && ranges[i][0];
+    return ranges[i]?.[0];
   }
 
   end(i) {
     const { _ranges: ranges, length } = this;
     assertValidRange('end', length, i);
-    return ranges[i] && ranges[i][1];
+    return ranges[i]?.[1];
   }
 }

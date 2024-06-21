@@ -1,14 +1,16 @@
+import type { RationalTimestamp } from '../utils/timescale-conversion';
+
 export interface Demuxer {
   demux(
     data: Uint8Array,
     timeOffset: number,
     isSampleAes?: boolean,
-    flush?: boolean
+    flush?: boolean,
   ): DemuxerResult;
   demuxSampleAes(
     data: Uint8Array,
     keyData: KeyData,
-    timeOffset: number
+    timeOffset: number,
   ): Promise<DemuxerResult>;
   flush(timeOffset?: number): DemuxerResult | Promise<DemuxerResult>;
   destroy(): void;
@@ -16,15 +18,15 @@ export interface Demuxer {
     initSegment: Uint8Array | undefined,
     audioCodec: string | undefined,
     videoCodec: string | undefined,
-    trackDuration: number
+    trackDuration: number,
   );
-  resetTimeStamp(defaultInitPTS?: number | null): void;
+  resetTimeStamp(defaultInitPTS?: RationalTimestamp | null): void;
   resetContiguity(): void;
 }
 
 export interface DemuxerResult {
   audioTrack: DemuxedAudioTrack;
-  videoTrack: DemuxedVideoTrack;
+  videoTrack: DemuxedVideoTrackBase;
   id3Track: DemuxedMetadataTrack;
   textTrack: DemuxedUserdataTrack;
 }
@@ -37,7 +39,7 @@ export interface DemuxedTrack {
   sequenceNumber: number;
   samples:
     | AudioSample[]
-    | AvcSample[]
+    | VideoSample[]
     | MetadataSample[]
     | UserdataSample[]
     | Uint8Array;
@@ -57,7 +59,7 @@ export interface PassthroughTrack extends DemuxedTrack {
   codec: string;
 }
 export interface DemuxedAudioTrack extends DemuxedTrack {
-  config?: number[];
+  config?: number[] | Uint8Array;
   samplerate?: number;
   segmentCodec?: string;
   channelCount?: number;
@@ -65,19 +67,21 @@ export interface DemuxedAudioTrack extends DemuxedTrack {
   samples: AudioSample[];
 }
 
-export interface DemuxedVideoTrack extends DemuxedTrack {
+export interface DemuxedVideoTrackBase extends DemuxedTrack {
   width?: number;
   height?: number;
   pixelRatio?: [number, number];
   audFound?: boolean;
-  pps?: number[];
-  sps?: number[];
+  pps?: Uint8Array[];
+  sps?: Uint8Array[];
   naluState?: number;
-  samples: AvcSample[] | Uint8Array;
+  segmentCodec?: string;
+  manifestCodec?: string;
+  samples: VideoSample[] | Uint8Array;
 }
 
-export interface DemuxedAvcTrack extends DemuxedVideoTrack {
-  samples: AvcSample[];
+export interface DemuxedVideoTrack extends DemuxedVideoTrackBase {
+  samples: VideoSample[];
 }
 
 export interface DemuxedMetadataTrack extends DemuxedTrack {
@@ -88,7 +92,7 @@ export interface DemuxedUserdataTrack extends DemuxedTrack {
   samples: UserdataSample[];
 }
 
-export enum MetadataSchema {
+export const enum MetadataSchema {
   audioId3 = 'org.id3',
   dateRange = 'com.apple.quicktime.HLS',
   emsg = 'https://aomedia.org/emsg/ID3',
@@ -96,6 +100,7 @@ export enum MetadataSchema {
 export interface MetadataSample {
   pts: number;
   dts: number;
+  duration: number;
   len?: number;
   data: Uint8Array;
   type: MetadataSchema;
@@ -111,19 +116,20 @@ export interface UserdataSample {
   userDataBytes?: Uint8Array;
 }
 
-export interface AvcSample {
+export interface VideoSample {
   dts: number;
   pts: number;
   key: boolean;
   frame: boolean;
-  units: AvcSampleUnit[];
+  units: VideoSampleUnit[];
   debug: string;
   length: number;
 }
 
-export interface AvcSampleUnit {
+export interface VideoSampleUnit {
   data: Uint8Array;
   type: number;
+  state?: number;
 }
 
 export type AudioSample = {

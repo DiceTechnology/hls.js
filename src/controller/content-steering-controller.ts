@@ -54,7 +54,7 @@ export default class ContentSteeringController implements NetworkComponentAPI {
   private loader: Loader<LoaderContext> | null = null;
   private uri: string | null = null;
   private pathwayId: string = '.';
-  private pathwayPriority: string[] | null = null;
+  private _pathwayPriority: string[] | null = null;
   private timeToLoad: number = 300;
   private reloadTimer: number = -1;
   private updated: number = 0;
@@ -88,6 +88,23 @@ export default class ContentSteeringController implements NetworkComponentAPI {
     hls.off(Events.MANIFEST_LOADED, this.onManifestLoaded, this);
     hls.off(Events.MANIFEST_PARSED, this.onManifestParsed, this);
     hls.off(Events.ERROR, this.onError, this);
+  }
+
+  pathways() {
+    return (this.levels || []).reduce((pathways, level) => {
+      if (pathways.indexOf(level.pathwayId) === -1) {
+        pathways.push(level.pathwayId);
+      }
+      return pathways;
+    }, [] as string[]);
+  }
+
+  get pathwayPriority(): string[] | null {
+    return this._pathwayPriority;
+  }
+
+  set pathwayPriority(pathwayPriority: string[]) {
+    this.updatePathwayPriority(pathwayPriority);
   }
 
   startLoad() {
@@ -176,7 +193,7 @@ export default class ContentSteeringController implements NetworkComponentAPI {
       errorAction.flags === ErrorActionFlags.MoveAllAlternatesMatchingHost
     ) {
       const levels = this.levels;
-      let pathwayPriority = this.pathwayPriority;
+      let pathwayPriority = this._pathwayPriority;
       let errorPathway = this.pathwayId;
       if (data.context) {
         const { groupId, pathwayId, type } = data.context;
@@ -191,12 +208,7 @@ export default class ContentSteeringController implements NetworkComponentAPI {
       }
       if (!pathwayPriority && levels) {
         // If PATHWAY-PRIORITY was not provided, list pathways for error handling
-        pathwayPriority = levels.reduce((pathways, level) => {
-          if (pathways.indexOf(level.pathwayId) === -1) {
-            pathways.push(level.pathwayId);
-          }
-          return pathways;
-        }, [] as string[]);
+        pathwayPriority = this.pathways();
       }
       if (pathwayPriority && pathwayPriority.length > 1) {
         this.updatePathwayPriority(pathwayPriority);
@@ -245,7 +257,7 @@ export default class ContentSteeringController implements NetworkComponentAPI {
   }
 
   private updatePathwayPriority(pathwayPriority: string[]) {
-    this.pathwayPriority = pathwayPriority;
+    this._pathwayPriority = pathwayPriority;
     let levels: Level[] | undefined;
 
     // Evaluate if we should remove the pathway from the penalized list

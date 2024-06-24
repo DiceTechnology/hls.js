@@ -970,6 +970,21 @@ export default class Hls implements HlsEventEmitter {
   get forceStartLoad(): boolean {
     return this.streamController.forceStartLoad;
   }
+
+  get pathways(): string[] {
+    return this.levelController.pathways;
+  }
+
+  /**
+   * ContentSteering pathwayPriority getter/setter
+   */
+  get pathwayPriority(): string[] | null {
+    return this.levelController.pathwayPriority;
+  }
+
+  set pathwayPriority(pathwayPriority: string[]) {
+    this.levelController.pathwayPriority = pathwayPriority;
+  }
 }
 
 export type {

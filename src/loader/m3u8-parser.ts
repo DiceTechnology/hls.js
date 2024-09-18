@@ -362,7 +362,7 @@ export default class M3U8Parser {
     let totalduration = 0;
     let discontinuityCounter = 0;
     let prevFrag: Fragment | null = null;
-    let frag: Fragment = new Fragment(type, baseurl);
+    let frag: Fragment = new Fragment(type, baseurl, level);
     let result: RegExpExecArray | RegExpMatchArray | null;
     let i: number;
     let levelkeys: { [key: string]: LevelKey } | undefined;
@@ -379,7 +379,7 @@ export default class M3U8Parser {
     while ((result = LEVEL_PLAYLIST_REGEX_FAST.exec(string)) !== null) {
       if (createNextFrag) {
         createNextFrag = false;
-        frag = new Fragment(type, baseurl);
+        frag = new Fragment(type, baseurl, level);
         // setup the next fragment for part loading
         frag.start = totalduration;
         frag.sn = currentSN;
@@ -611,7 +611,7 @@ export default class M3U8Parser {
               // Initial segment tag is after segment duration tag.
               //   #EXTINF: 6.0
               //   #EXT-X-MAP:URI="init.mp4
-              const init = new Fragment(type, baseurl);
+              const init = new Fragment(type, baseurl, level);
               setInitSegment(init, mapAttrs, id, levelkeys);
               currentInitSegment = init;
               frag.initSegment = currentInitSegment;
@@ -675,6 +675,7 @@ export default class M3U8Parser {
               ]);
             }
             const part = new Part(
+              level,
               partAttrs,
               frag,
               baseurl,

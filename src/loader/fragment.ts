@@ -9,6 +9,7 @@ import type {
   PlaylistLevelType,
 } from '../types/loader';
 import type { KeySystemFormats } from '../utils/mediakeys-helper';
+import type { LevelDetails } from './level-details';
 
 export const enum ElementaryStreamTypes {
   AUDIO = 'audio',
@@ -32,11 +33,12 @@ export type ElementaryStreams = Record<
 export class BaseSegment {
   private _byteRange: [number, number] | null = null;
   private _url: string | null = null;
+  private _levelDetails: LevelDetails;
+  // relurl is the portion of the URL that comes from inside the playlist.
+  private _relurl?: string;
 
   // baseurl is the URL to the playlist
   public readonly baseurl: string;
-  // relurl is the portion of the URL that comes from inside the playlist.
-  public relurl?: string;
   // Holds the types of data this fragment supports
   public elementaryStreams: ElementaryStreams = {
     [ElementaryStreamTypes.AUDIO]: null,
@@ -44,8 +46,10 @@ export class BaseSegment {
     [ElementaryStreamTypes.AUDIOVIDEO]: null,
   };
 
-  constructor(baseurl: string) {
-    this.baseurl = baseurl;
+  constructor(baseurl: string, levelDetails: LevelDetails) {
+    const url = new URL(baseurl);
+    this.baseurl = url.origin + url.pathname; // Strip out the query params
+    this._levelDetails = levelDetails;
   }
 
   // setByteRange converts a EXT-X-BYTERANGE attribute into a two element array
@@ -78,15 +82,28 @@ export class BaseSegment {
 
   get url(): string {
     if (!this._url && this.baseurl && this.relurl) {
-      this._url = buildAbsoluteURL(this.baseurl, this.relurl, {
-        alwaysNormalize: true,
-      });
+      this._url = buildAbsoluteURL(
+        this.baseurl,
+        this.relurl + this._levelDetails.urlQueryParams,
+        {
+          alwaysNormalize: true,
+        },
+      );
     }
     return this._url || '';
   }
 
+  get relurl(): string | undefined {
+    return this._relurl;
+  }
+
   set url(value: string) {
     this._url = value;
+  }
+
+  set relurl(value: string) {
+    // remove QueryParams from relUrl
+    this._relurl = value.split('?')[0];
   }
 }
 
@@ -151,8 +168,12 @@ export class Fragment extends BaseSegment {
   // Deprecated
   public urlId: number = 0;
 
-  constructor(type: PlaylistLevelType, baseurl: string) {
-    super(baseurl);
+  constructor(
+    type: PlaylistLevelType,
+    baseurl: string,
+    levelDetails: LevelDetails,
+  ) {
+    super(baseurl, levelDetails);
     this.type = type;
   }
 
@@ -273,19 +294,20 @@ export class Part extends BaseSegment {
   public readonly duration: number = 0;
   public readonly gap: boolean = false;
   public readonly independent: boolean = false;
-  public readonly relurl: string;
+  // public readonly relurl: string;
   public readonly fragment: Fragment;
   public readonly index: number;
   public stats: LoadStats = new LoadStats();
 
   constructor(
+    levelDetails: LevelDetails,
     partAttrs: AttrList,
     frag: Fragment,
     baseurl: string,
     index: number,
     previous?: Part,
   ) {
-    super(baseurl);
+    super(baseurl, levelDetails);
     this.duration = partAttrs.decimalFloatingPoint('DURATION');
     this.gap = partAttrs.bool('GAP');
     this.independent = partAttrs.bool('INDEPENDENT');

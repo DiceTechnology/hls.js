@@ -55,12 +55,14 @@ export class LevelDetails {
   public playlistParsingError: Error | null = null;
   public variableList: VariableMap | null = null;
   public hasVariableRefs = false;
+  public urlQueryParams: string;
 
   constructor(baseUrl: string) {
     this.fragments = [];
     this.encryptedFragments = [];
     this.dateRanges = {};
     this.url = baseUrl;
+    this.urlQueryParams = new URL(baseUrl).search;
   }
 
   reloaded(previous: LevelDetails | undefined) {

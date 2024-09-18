@@ -290,7 +290,7 @@ export class BasePlaylistController implements NetworkComponentAPI {
 //
 // @public (undocumented)
 export class BaseSegment {
-    constructor(baseurl: string);
+    constructor(baseurl: string, levelDetails: LevelDetails);
     // (undocumented)
     readonly baseurl: string;
     // (undocumented)
@@ -302,7 +302,8 @@ export class BaseSegment {
     // (undocumented)
     elementaryStreams: ElementaryStreams;
     // (undocumented)
-    relurl?: string;
+    get relurl(): string | undefined;
+    set relurl(value: string);
     // (undocumented)
     setByteRange(value: string, previous?: BaseSegment): void;
     // (undocumented)
@@ -1396,7 +1397,7 @@ export interface FragLoadingData {
 //
 // @public
 export class Fragment extends BaseSegment {
-    constructor(type: PlaylistLevelType, baseurl: string);
+    constructor(type: PlaylistLevelType, baseurl: string, levelDetails: LevelDetails);
     // (undocumented)
     abortRequests(): void;
     // (undocumented)
@@ -2273,6 +2274,8 @@ export class LevelDetails {
     // (undocumented)
     url: string;
     // (undocumented)
+    urlQueryParams: string;
+    // (undocumented)
     variableList: VariableMap | null;
     // (undocumented)
     version: number | null;
@@ -2981,7 +2984,7 @@ export interface NonNativeTextTracksData {
 //
 // @public
 export class Part extends BaseSegment {
-    constructor(partAttrs: AttrList, frag: Fragment, baseurl: string, index: number, previous?: Part);
+    constructor(levelDetails: LevelDetails, partAttrs: AttrList, frag: Fragment, baseurl: string, index: number, previous?: Part);
     // (undocumented)
     readonly duration: number;
     // (undocumented)
@@ -2998,8 +3001,6 @@ export class Part extends BaseSegment {
     readonly index: number;
     // (undocumented)
     get loaded(): boolean;
-    // (undocumented)
-    readonly relurl: string;
     // (undocumented)
     get start(): number;
     // (undocumented)

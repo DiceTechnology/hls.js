@@ -82,7 +82,7 @@ export class BaseSegment {
 
   get url(): string {
     if (!this._url && this.baseurl && this.relurl) {
-      this._url = buildAbsoluteURL(
+      return buildAbsoluteURL(
         this.baseurl,
         this.relurl + this._levelDetails.urlQueryParams,
         {
@@ -90,7 +90,7 @@ export class BaseSegment {
         },
       );
     }
-    return this._url || '';
+    return '';
   }
 
   get relurl(): string | undefined {

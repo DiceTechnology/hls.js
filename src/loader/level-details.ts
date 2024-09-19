@@ -1,4 +1,5 @@
 import { Part } from './fragment';
+import { Tokenizer } from '../utils/tokenizer';
 import type { Fragment } from './fragment';
 import type { AttrList } from '../utils/attr-list';
 import type { DateRange } from './date-range';
@@ -32,8 +33,7 @@ export class LevelDetails {
   public targetduration: number = 0;
   public totalduration: number = 0;
   public type: string | null = null;
-  public url: string;
-  public m3u8: string = '';
+
   public version: number | null = null;
   public canBlockReload: boolean = false;
   public canSkipUntil: number = 0;
@@ -56,6 +56,9 @@ export class LevelDetails {
   public variableList: VariableMap | null = null;
   public hasVariableRefs = false;
   public urlQueryParams: string;
+
+  private _m3u8Tokenized: Array<number | string> = [];
+  private _urlTokenized: Array<number | string> = [];
 
   constructor(baseUrl: string) {
     this.fragments = [];
@@ -88,6 +91,22 @@ export class LevelDetails {
       this.misses = previous.misses + 1;
     }
     this.availabilityDelay = previous.availabilityDelay;
+  }
+
+  get m3u8(): string {
+    return Tokenizer.detokenize(this._m3u8Tokenized);
+  }
+
+  set m3u8(m3u8: string) {
+    this._m3u8Tokenized = Tokenizer.tokenize(m3u8);
+  }
+
+  get url(): string {
+    return Tokenizer.detokenize(this._urlTokenized);
+  }
+
+  set url(url: string) {
+    this._urlTokenized = Tokenizer.tokenize(url);
   }
 
   get hasProgramDateTime(): boolean {

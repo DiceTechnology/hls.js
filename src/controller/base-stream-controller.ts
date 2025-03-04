@@ -1349,8 +1349,13 @@ export default class BaseStreamController
     if (!media) {
       return;
     }
+
     const liveSyncPosition = this.hls.liveSyncPosition;
-    const currentTime = media.currentTime;
+    const mediaCurrentTime = media.currentTime;
+    const currentTime =
+      this.loadedmetadata || mediaCurrentTime > 0
+        ? mediaCurrentTime
+        : this.startPosition;
     const start = levelDetails.fragments[0].start;
     const end = levelDetails.edge;
     const withinSlidingWindow =
@@ -1376,12 +1381,12 @@ export default class BaseStreamController
         }
         // Only seek if ready and there is not a significant forward buffer available for playback
         if (media.readyState) {
+          const reason =
+            !withinSlidingWindow && media.readyState < 4
+              ? 'outside'
+              : 'too far from the end';
           this.warn(
-            `Playback: ${currentTime.toFixed(
-              3,
-            )} is located too far from the end of live sliding playlist: ${end}, reset currentTime to : ${liveSyncPosition.toFixed(
-              3,
-            )}`,
+            `Playback: ${currentTime.toFixed(3)} is located ${reason} of live sliding playlist: ${start.toFixed(3)} - ${end.toFixed(3)}, reset currentTime to : ${liveSyncPosition.toFixed(3)}`,
           );
           media.currentTime = liveSyncPosition;
         }

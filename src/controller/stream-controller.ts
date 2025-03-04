@@ -688,10 +688,7 @@ export default class StreamController
 
     if (!this.startFragRequested) {
       this.setStartPosition(newDetails, sliding);
-    } else if (newDetails.live && this.loadedmetadata) {
-      // Only synchronize live playlists if the metadata is available. This is to avoid race conditions
-      // where the currentTime is not yet adjusted to start position and synchronizeToLiveEdge would cause
-      // the initially loaded segment to be needlessly discarded.
+    } else if (newDetails.live) {
       this.synchronizeToLiveEdge(newDetails);
     }
 

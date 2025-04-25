@@ -940,9 +940,9 @@ export class EMEController implements ComponentAPI {
     // (undocumented)
     loadKey(data: KeyLoadedData): Promise<MediaKeySessionContext>;
     // (undocumented)
-    selectKeySystemFormat(frag: Fragment): Promise<KeySystemFormats>;
+    selectKeySystem(keySystemsToAttempt: KeySystems[]): Promise<KeySystemFormats>;
     // (undocumented)
-    test_selectKeySystemFromConfig(keySystemsToAttempt: KeySystems[]): Promise<KeySystemFormats>;
+    selectKeySystemFormat(frag: Fragment): Promise<KeySystemFormats>;
 }
 
 // Warning: (ae-missing-release-tag) "EMEControllerConfig" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -956,6 +956,7 @@ export type EMEControllerConfig = {
     drmSystems: DRMSystemsConfiguration;
     drmSystemOptions: DRMSystemOptions;
     requestMediaKeySystemAccessFunc: MediaKeyFunc | null;
+    experimentalKeySystemAccessForClearContent?: boolean;
 };
 
 // Warning: (ae-missing-release-tag) "ErrorActionFlags" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)

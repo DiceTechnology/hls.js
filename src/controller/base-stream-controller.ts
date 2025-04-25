@@ -49,6 +49,7 @@ import type { HlsConfig } from '../config';
 import type { NetworkComponentAPI } from '../types/component-api';
 import type { SourceBufferName } from '../types/buffer';
 import type { RationalTimestamp } from '../utils/timescale-conversion';
+import { getKeySystemsForConfig } from '../utils/mediakeys-helper';
 
 type ResolveFragLoaded = (FragLoadedEndData) => void;
 type RejectFragLoaded = (LoadError) => void;
@@ -666,6 +667,9 @@ export default class BaseStreamController
       this.fragCurrent = frag;
       keyLoadingPromise = this.keyLoader.load(frag).then((keyLoadedData) => {
         if (!this.fragContextChanged(keyLoadedData.frag)) {
+          this.log(
+            'Emitting KEY_LOADED event without key info - blame this if something goes wrong',
+          );
           this.hls.trigger(Events.KEY_LOADED, keyLoadedData);
           if (this.state === State.KEY_LOADING) {
             this.state = State.IDLE;
@@ -679,9 +683,37 @@ export default class BaseStreamController
           new Error(`frag load aborted, context changed in KEY_LOADING`),
         );
       }
-    } else if (!frag.encrypted && details.encryptedFragments.length) {
-      this.keyLoader.loadClear(frag, details.encryptedFragments);
+    } else if (!frag.encrypted) {
+      const keySystemsInConfig = getKeySystemsForConfig(this.config);
+      if (keySystemsInConfig.length) {
+        this.log(
+          `Loading keys from config ${JSON.stringify(keySystemsInConfig)}`,
+        );
+        this.state = State.KEY_LOADING;
+        this.fragCurrent = frag;
+        keyLoadingPromise = this.keyLoader
+          .test_loadKeysBeforeFragLoad(frag, keySystemsInConfig)
+          .then((keyLoadedData) => {
+            if (!this.fragContextChanged(keyLoadedData.frag)) {
+              this.hls.trigger(Events.KEY_LOADED, keyLoadedData);
+              if (this.state === State.KEY_LOADING) {
+                this.state = State.IDLE;
+              }
+              return keyLoadedData;
+            }
+          });
+        this.hls.trigger(Events.KEY_LOADING, { frag });
+        if (this.fragCurrent === null) {
+          keyLoadingPromise = Promise.reject(
+            new Error(`frag load aborted, context changed in KEY_LOADING`),
+          );
+        }
+      } else if (details.encryptedFragments.length) {
+        this.keyLoader.loadClear(frag, details.encryptedFragments);
+      }
     }
+    // else if (!frag.encrypted && details.encryptedFragments.length) {
+    // }
 
     targetBufferTime = Math.max(frag.start, targetBufferTime || 0);
     if (this.config.lowLatencyMode && frag.sn !== 'initSegment') {

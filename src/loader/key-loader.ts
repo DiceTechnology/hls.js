@@ -16,6 +16,7 @@ import type { KeyLoadedData } from '../types/events';
 import type { LevelKey } from './level-key';
 import type EMEController from '../controller/eme-controller';
 import type { MediaKeySessionContext } from '../controller/eme-controller';
+import { getKeySystemsForConfig } from '../utils/mediakeys-helper';
 import type { KeySystemFormats } from '../utils/mediakeys-helper';
 
 export interface KeyLoaderInfo {
@@ -90,25 +91,36 @@ export default class KeyLoader implements ComponentAPI {
   loadClear(
     loadingFrag: Fragment,
     encryptedFragments: Fragment[],
-  ): void | Promise<void> {
+  ): null | Promise<void> {
     if (this.emeController && this.config.emeEnabled) {
-      // access key-system with nearest key on start (loaidng frag is unencrypted)
-      const { sn, cc } = loadingFrag;
-      for (let i = 0; i < encryptedFragments.length; i++) {
-        const frag = encryptedFragments[i];
-        if (
-          cc <= frag.cc &&
-          (sn === 'initSegment' || frag.sn === 'initSegment' || sn < frag.sn)
-        ) {
-          this.emeController
-            .selectKeySystemFormat(frag)
-            .then((keySystemFormat) => {
-              frag.setKeyFormat(keySystemFormat);
+      // access key-system with nearest key on start (loading frag is unencrypted)
+      if (encryptedFragments.length) {
+        const { sn, cc } = loadingFrag;
+        for (let i = 0; i < encryptedFragments.length; i++) {
+          const frag = encryptedFragments[i];
+          if (
+            cc <= frag.cc &&
+            (sn === 'initSegment' || frag.sn === 'initSegment' || sn < frag.sn)
+          ) {
+            return this.emeController
+              .selectKeySystemFormat(frag)
+              .then((keySystemFormat) => {
+                frag.setKeyFormat(keySystemFormat);
+              });
+          }
+        }
+      } else if (this.config.requireKeySystemAccessOnStart) {
+        const keySystemsInConfig = getKeySystemsForConfig(this.config);
+        if (keySystemsInConfig.length) {
+          return this.emeController
+            .selectKeySystem(keySystemsInConfig)
+            .then(() => {
+              /* void */
             });
-          break;
         }
       }
     }
+    return null;
   }
 
   load(frag: Fragment): Promise<KeyLoadedData> {

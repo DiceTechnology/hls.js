@@ -383,6 +383,25 @@ class EMEController implements ComponentAPI {
     return keySession.update(data);
   }
 
+  public selectKeySystem(
+    keySystemsToAttempt: KeySystems[],
+  ): Promise<KeySystemFormats> {
+    return new Promise((resolve, reject) => {
+      return this.getKeySystemSelectionPromise(keySystemsToAttempt)
+        .then(({ keySystem }) => {
+          const keySystemFormat = keySystemToKeySystemFormat(keySystem);
+          if (keySystemFormat) {
+            resolve(keySystemFormat);
+          } else {
+            reject(
+              new Error(`Unable to find format for key-system "${keySystem}"`),
+            );
+          }
+        })
+        .catch(reject);
+    });
+  }
+
   public selectKeySystemFormat(frag: Fragment): Promise<KeySystemFormats> {
     const keyFormats = Object.keys(frag.levelkeys || {}) as KeySystemFormats[];
     if (!this.keyFormatPromise) {
@@ -399,26 +418,14 @@ class EMEController implements ComponentAPI {
   private getKeyFormatPromise(
     keyFormats: KeySystemFormats[],
   ): Promise<KeySystemFormats> {
-    return new Promise((resolve, reject) => {
-      const keySystemsInConfig = getKeySystemsForConfig(this.config);
-      const keySystemsToAttempt = keyFormats
-        .map(keySystemFormatToKeySystemDomain)
-        .filter(
-          (value) => !!value && keySystemsInConfig.indexOf(value) !== -1,
-        ) as any as KeySystems[];
-      return this.getKeySystemSelectionPromise(keySystemsToAttempt)
-        .then(({ keySystem }) => {
-          const keySystemFormat = keySystemToKeySystemFormat(keySystem);
-          if (keySystemFormat) {
-            resolve(keySystemFormat);
-          } else {
-            reject(
-              new Error(`Unable to find format for key-system "${keySystem}"`),
-            );
-          }
-        })
-        .catch(reject);
-    });
+    const keySystemsInConfig = getKeySystemsForConfig(this.config);
+    const keySystemsToAttempt = keyFormats
+      .map(keySystemFormatToKeySystemDomain)
+      .filter(
+        (value) => !!value && keySystemsInConfig.indexOf(value) !== -1,
+      ) as any as KeySystems[];
+
+    return this.selectKeySystem(keySystemsToAttempt);
   }
 
   public loadKey(data: KeyLoadedData): Promise<MediaKeySessionContext> {

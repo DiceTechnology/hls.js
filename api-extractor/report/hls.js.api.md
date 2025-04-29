@@ -940,6 +940,8 @@ export class EMEController implements ComponentAPI {
     // (undocumented)
     loadKey(data: KeyLoadedData): Promise<MediaKeySessionContext>;
     // (undocumented)
+    selectKeySystem(keySystemsToAttempt: KeySystems[]): Promise<KeySystemFormats>;
+    // (undocumented)
     selectKeySystemFormat(frag: Fragment): Promise<KeySystemFormats>;
 }
 
@@ -954,6 +956,7 @@ export type EMEControllerConfig = {
     drmSystems: DRMSystemsConfiguration;
     drmSystemOptions: DRMSystemOptions;
     requestMediaKeySystemAccessFunc: MediaKeyFunc | null;
+    requireKeySystemAccessOnStart: boolean;
 };
 
 // Warning: (ae-missing-release-tag) "ErrorActionFlags" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)

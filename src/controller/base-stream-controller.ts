@@ -679,8 +679,16 @@ export default class BaseStreamController
           new Error(`frag load aborted, context changed in KEY_LOADING`),
         );
       }
-    } else if (!frag.encrypted && details.encryptedFragments.length) {
-      this.keyLoader.loadClear(frag, details.encryptedFragments);
+    } else if (!frag.encrypted) {
+      keyLoadingPromise = this.keyLoader.loadClear(
+        frag,
+        details.encryptedFragments,
+      );
+      if (keyLoadingPromise) {
+        // TODO: This gets logged on every clear segment load regardless of having key system initialized.
+        // keyLoader.loadClear should be optimized to not return a promise if we don't need to wait for key system access.
+        this.log(`[eme] blocking frag load until media-keys acquired`);
+      }
     }
 
     targetBufferTime = Math.max(frag.start, targetBufferTime || 0);

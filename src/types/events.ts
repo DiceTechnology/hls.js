@@ -201,6 +201,10 @@ export interface LevelPTSUpdatedData {
   end: number;
 }
 
+export interface VideoPtsNeededData {
+  cc: number;
+}
+
 export interface AudioTrackSwitchingData extends MediaPlaylist {}
 
 export interface AudioTrackSwitchedData extends MediaPlaylist {}

@@ -49,6 +49,7 @@ import {
   TrackLoadingData,
   BufferFlushedData,
   SteeringManifestLoadedData,
+  VideoPtsNeededData,
 } from './types/events';
 
 export enum Events {
@@ -168,6 +169,8 @@ export enum Events {
   BACK_BUFFER_REACHED = 'hlsBackBufferReached',
   // fired after steering manifest has been loaded - data: { steeringManifest: SteeringManifest object, url: steering manifest URL }
   STEERING_MANIFEST_LOADED = 'hlsSteeringManifestLoaded',
+  // fired when audio stream controller is stuck and requires video PTS to be available for a continuity
+  VIDEO_PTS_NEEDED = 'hlsVideoPtsNeeded',
 }
 
 /**
@@ -374,6 +377,10 @@ export interface HlsListeners {
   [Events.STEERING_MANIFEST_LOADED]: (
     event: Events.STEERING_MANIFEST_LOADED,
     data: SteeringManifestLoadedData,
+  ) => void;
+  [Events.VIDEO_PTS_NEEDED]: (
+    event: Events.VIDEO_PTS_NEEDED,
+    data: VideoPtsNeededData,
   ) => void;
 }
 export interface HlsEventEmitter {

@@ -241,6 +241,10 @@ class AudioStreamController
                 `Waiting fragment cc (${frag.cc}) @ ${frag.start} cancelled because another fragment at ${bufferInfo.end} is needed`,
               );
               this.clearWaitingFragment();
+            } else if (this.waitingVideoCC != null) {
+              this.hls.trigger(Events.VIDEO_PTS_NEEDED, {
+                cc: waitingData.frag.cc,
+              });
             }
           }
         } else {

@@ -97,6 +97,7 @@ export default class BaseStreamController
   protected startFragRequested: boolean = false;
   protected decrypter: Decrypter;
   protected initPTS: RationalTimestamp[] = [];
+  protected waitingCc: number | null = null;
   protected onvseeking: EventListener | null = null;
   protected onvended: EventListener | null = null;
 
@@ -1111,6 +1112,7 @@ export default class BaseStreamController
         ? levelDetails.partEnd
         : levelDetails.fragmentEnd;
       frag = this.getFragmentAtPosition(pos, end, levelDetails);
+      this.waitingCc = null;
     }
 
     return this.mapToInitFragWhenRequired(frag);
@@ -1301,50 +1303,70 @@ export default class BaseStreamController
     }
 
     let frag;
-    if (bufferEnd < end) {
-      const lookupTolerance =
-        bufferEnd > end - maxFragLookUpTolerance ? 0 : maxFragLookUpTolerance;
-      // Remove the tolerance if it would put the bufferEnd past the actual end of stream
-      // Uses buffer and sequence number to calculate switch segment (required if using EXT-X-DISCONTINUITY-SEQUENCE)
-      frag = findFragmentByPTS(
-        fragPrevious,
-        fragments,
-        bufferEnd,
-        lookupTolerance,
+    if (
+      this.waitingCc != null &&
+      fragPrevious != null &&
+      fragPrevious.cc !== this.waitingCc
+    ) {
+      const fragmentsWithMatchingCc = fragments.filter(
+        (fragment) => fragment.cc === this.waitingCc,
       );
-    } else {
-      // reach end of playlist
-      frag = fragments[fragments.length - 1];
+      if (fragmentsWithMatchingCc.length) {
+        // Use the last fragment with matching CC as this issue generally occurs at the end of discontinuities
+        // with slightly offset audio / video manifests.
+        frag = fragmentsWithMatchingCc[fragmentsWithMatchingCc.length - 1];
+        this.log(
+          `Loading video segment ${frag.sn} (cc: ${frag.cc}) to get initPTS for audio-stream-controller.`,
+        );
+      }
     }
 
-    if (frag) {
-      const curSNIdx = frag.sn - levelDetails.startSN;
-      // Move fragPrevious forward to support forcing the next fragment to load
-      // when the buffer catches up to a previously buffered range.
-      const fragState = this.fragmentTracker.getState(frag);
-      if (
-        fragState === FragmentState.OK ||
-        (fragState === FragmentState.PARTIAL && frag.gap)
-      ) {
-        fragPrevious = frag;
+    if (!frag) {
+      if (bufferEnd < end) {
+        const lookupTolerance =
+          bufferEnd > end - maxFragLookUpTolerance ? 0 : maxFragLookUpTolerance;
+        // Remove the tolerance if it would put the bufferEnd past the actual end of stream
+        // Uses buffer and sequence number to calculate switch segment (required if using EXT-X-DISCONTINUITY-SEQUENCE)
+        frag = findFragmentByPTS(
+          fragPrevious,
+          fragments,
+          bufferEnd,
+          lookupTolerance,
+        );
+      } else {
+        // reach end of playlist
+        frag = fragments[fragments.length - 1];
       }
-      if (
-        fragPrevious &&
-        frag.sn === fragPrevious.sn &&
-        (!loadingParts || partList[0].fragment.sn > frag.sn)
-      ) {
-        // Force the next fragment to load if the previous one was already selected. This can occasionally happen with
-        // non-uniform fragment durations
-        const sameLevel = fragPrevious && frag.level === fragPrevious.level;
-        if (sameLevel) {
-          const nextFrag = fragments[curSNIdx + 1];
-          if (
-            frag.sn < endSN &&
-            this.fragmentTracker.getState(nextFrag) !== FragmentState.OK
-          ) {
-            frag = nextFrag;
-          } else {
-            frag = null;
+
+      if (frag) {
+        const curSNIdx = frag.sn - levelDetails.startSN;
+        // Move fragPrevious forward to support forcing the next fragment to load
+        // when the buffer catches up to a previously buffered range.
+        const fragState = this.fragmentTracker.getState(frag);
+        if (
+          fragState === FragmentState.OK ||
+          (fragState === FragmentState.PARTIAL && frag.gap)
+        ) {
+          fragPrevious = frag;
+        }
+        if (
+          fragPrevious &&
+          frag.sn === fragPrevious.sn &&
+          (!loadingParts || partList[0].fragment.sn > frag.sn)
+        ) {
+          // Force the next fragment to load if the previous one was already selected. This can occasionally happen with
+          // non-uniform fragment durations
+          const sameLevel = fragPrevious && frag.level === fragPrevious.level;
+          if (sameLevel) {
+            const nextFrag = fragments[curSNIdx + 1];
+            if (
+              frag.sn < endSN &&
+              this.fragmentTracker.getState(nextFrag) !== FragmentState.OK
+            ) {
+              frag = nextFrag;
+            } else {
+              frag = null;
+            }
           }
         }
       }

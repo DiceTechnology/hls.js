@@ -506,6 +506,8 @@ export class BaseStreamController extends TaskLoop implements NetworkComponentAP
     // (undocumented)
     protected waitForCdnTuneIn(details: LevelDetails): boolean | 0;
     // (undocumented)
+    protected waitingCc: number | null;
+    // (undocumented)
     protected warn: (msg: any) => void;
 }
 
@@ -959,6 +961,18 @@ export type EMEControllerConfig = {
     requireKeySystemAccessOnStart: boolean;
 };
 
+// Warning: (ae-missing-release-tag) "EmeKeyStatusErrorData" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface EmeKeyStatusErrorData {
+    // (undocumented)
+    decryptdata: LevelKey;
+    // (undocumented)
+    keyStatus: MediaKeyStatus;
+    // (undocumented)
+    keySystem: KeySystems;
+}
+
 // Warning: (ae-missing-release-tag) "ErrorActionFlags" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
@@ -1187,6 +1201,8 @@ export enum Events {
     // (undocumented)
     DESTROYING = "hlsDestroying",
     // (undocumented)
+    EME_KEY_STATUS_ERROR = "hlsEmeKeyStatusError",
+    // (undocumented)
     ERROR = "hlsError",
     // (undocumented)
     FPS_DROP = "hlsFpsDrop",
@@ -1265,7 +1281,9 @@ export enum Events {
     // (undocumented)
     SUBTITLE_TRACKS_CLEARED = "hlsSubtitleTracksCleared",
     // (undocumented)
-    SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated"
+    SUBTITLE_TRACKS_UPDATED = "hlsSubtitleTracksUpdated",
+    // (undocumented)
+    VIDEO_PTS_NEEDED = "hlsVideoPtsNeeded"
 }
 
 // Warning: (ae-missing-release-tag) "FPSController" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
@@ -1785,6 +1803,8 @@ export interface HlsListeners {
     // (undocumented)
     [Events.DESTROYING]: (event: Events.DESTROYING) => void;
     // (undocumented)
+    [Events.EME_KEY_STATUS_ERROR]: (event: Events.EME_KEY_STATUS_ERROR, data: EmeKeyStatusErrorData) => void;
+    // (undocumented)
     [Events.ERROR]: (event: Events.ERROR, data: ErrorData) => void;
     // (undocumented)
     [Events.FPS_DROP]: (event: Events.FPS_DROP, data: FPSDropData) => void;
@@ -1866,6 +1886,10 @@ export interface HlsListeners {
     [Events.SUBTITLE_TRACKS_UPDATED]: (event: Events.SUBTITLE_TRACKS_UPDATED, data: SubtitleTracksUpdatedData) => void;
     // (undocumented)
     [Events.SUBTITLE_TRACK_SWITCH]: (event: Events.SUBTITLE_TRACK_SWITCH, data: SubtitleTrackSwitchData) => void;
+    // Warning: (ae-forgotten-export) The symbol "VideoPtsNeededData" needs to be exported by the entry point hls.d.ts
+    //
+    // (undocumented)
+    [Events.VIDEO_PTS_NEEDED]: (event: Events.VIDEO_PTS_NEEDED, data: VideoPtsNeededData) => void;
 }
 
 // Warning: (ae-missing-release-tag) "HlsLoadPolicies" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)

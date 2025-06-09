@@ -851,6 +851,14 @@ class EMEController implements ComponentAPI {
         this.warn(`${context.keySystem} expired for key ${keyId}`);
         this.renewKeySession(context);
       }
+      if (keyStatus === 'internal-error') {
+        this.warn(`${context.keySystem} internal-error for key ${keyId}`);
+        this.hls.trigger(Events.EME_KEY_STATUS_ERROR, {
+          keySystem: context.keySystem,
+          decryptdata: context.decryptdata,
+          keyStatus: context.keyStatus,
+        });
+      }
     });
 
     context.mediaKeysSession.addEventListener('message', onmessage);
@@ -878,16 +886,18 @@ class EMEController implements ComponentAPI {
               ),
             );
           } else if (keyStatus === 'internal-error') {
-            reject(
-              new EMEKeyError(
-                {
-                  type: ErrorTypes.KEY_SYSTEM_ERROR,
-                  details: ErrorDetails.KEY_SYSTEM_STATUS_INTERNAL_ERROR,
-                  fatal: true,
-                },
-                `key status changed to "${keyStatus}"`,
-              ),
-            );
+            this.warn('keyUsablePromise: internal-error');
+            resolve();
+            // reject(
+            //   new EMEKeyError(
+            //     {
+            //       type: ErrorTypes.KEY_SYSTEM_ERROR,
+            //       details: ErrorDetails.KEY_SYSTEM_STATUS_INTERNAL_ERROR,
+            //       fatal: true,
+            //     },
+            //     `key status changed to "${keyStatus}"`,
+            //   ),
+            // );
           } else if (keyStatus === 'expired') {
             reject(new Error('key expired while generating request'));
           } else {

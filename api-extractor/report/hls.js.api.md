@@ -966,11 +966,11 @@ export type EMEControllerConfig = {
 // @public (undocumented)
 export interface EmeKeyStatusErrorData {
     // (undocumented)
-    decryptdata: LevelKey;
+    keyId: string;
     // (undocumented)
     keyStatus: MediaKeyStatus;
     // (undocumented)
-    keySystem: KeySystems;
+    keySystem: string;
 }
 
 // Warning: (ae-missing-release-tag) "ErrorActionFlags" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)

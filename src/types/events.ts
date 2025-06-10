@@ -207,8 +207,8 @@ export interface VideoPtsNeededData {
 }
 
 export interface EmeKeyStatusErrorData {
-  keySystem: KeySystems;
-  decryptdata: LevelKey;
+  keySystem: string;
+  keyId: string;
   keyStatus: MediaKeyStatus;
 }
 

@@ -50,7 +50,7 @@ import {
   BufferFlushedData,
   SteeringManifestLoadedData,
   VideoPtsNeededData,
-  EmeKeyStatusErrorData,
+  KeyStatusChangedData,
 } from './types/events';
 
 export enum Events {
@@ -173,7 +173,7 @@ export enum Events {
   // fired when audio stream controller is stuck and requires video PTS to be available for a continuity
   VIDEO_PTS_NEEDED = 'hlsVideoPtsNeeded',
   // HD DRM
-  EME_KEY_STATUS_ERROR = 'hlsEmeKeyStatusError',
+  KEY_STATUS_CHANGED = 'hlsKeyStatusChanged',
 }
 
 /**
@@ -385,9 +385,9 @@ export interface HlsListeners {
     event: Events.VIDEO_PTS_NEEDED,
     data: VideoPtsNeededData,
   ) => void;
-  [Events.EME_KEY_STATUS_ERROR]: (
-    event: Events.EME_KEY_STATUS_ERROR,
-    data: EmeKeyStatusErrorData,
+  [Events.KEY_STATUS_CHANGED]: (
+    event: Events.KEY_STATUS_CHANGED,
+    data: KeyStatusChangedData,
   ) => void;
 }
 export interface HlsEventEmitter {

@@ -851,6 +851,11 @@ class EMEController implements ComponentAPI {
         this.warn(`${context.keySystem} expired for key ${keyId}`);
         this.renewKeySession(context);
       }
+
+      this.hls.trigger(Events.KEY_STATUS_CHANGED, {
+        keySystem: context.decryptdata.keyFormat,
+        keyStatuses: keySession.keyStatuses,
+      });
     });
 
     context.mediaKeysSession.addEventListener('message', onmessage);
@@ -932,19 +937,6 @@ class EMEController implements ComponentAPI {
             new Uint8Array(mediaKeySessionContext.decryptdata.keyId || []),
           )} uri: ${mediaKeySessionContext.decryptdata.uri}`,
         );
-
-        if (status === 'internal-error') {
-          const hexKeyId = Hex.hexDump(
-            'buffer' in keyId
-              ? new Uint8Array(keyId.buffer, keyId.byteOffset, keyId.byteLength)
-              : new Uint8Array(keyId),
-          );
-          this.hls.trigger(Events.EME_KEY_STATUS_ERROR, {
-            keyId: hexKeyId,
-            keySystem: mediaKeySessionContext.decryptdata.keyFormat,
-            keyStatus: status,
-          });
-        }
         mediaKeySessionContext.keyStatus = status;
       },
     );

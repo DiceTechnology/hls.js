@@ -961,18 +961,6 @@ export type EMEControllerConfig = {
     requireKeySystemAccessOnStart: boolean;
 };
 
-// Warning: (ae-missing-release-tag) "EmeKeyStatusErrorData" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
-//
-// @public (undocumented)
-export interface EmeKeyStatusErrorData {
-    // (undocumented)
-    keyId: string;
-    // (undocumented)
-    keyStatus: MediaKeyStatus;
-    // (undocumented)
-    keySystem: string;
-}
-
 // Warning: (ae-missing-release-tag) "ErrorActionFlags" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
 //
 // @public (undocumented)
@@ -1201,8 +1189,6 @@ export enum Events {
     // (undocumented)
     DESTROYING = "hlsDestroying",
     // (undocumented)
-    EME_KEY_STATUS_ERROR = "hlsEmeKeyStatusError",
-    // (undocumented)
     ERROR = "hlsError",
     // (undocumented)
     FPS_DROP = "hlsFpsDrop",
@@ -1234,6 +1220,8 @@ export enum Events {
     KEY_LOADED = "hlsKeyLoaded",
     // (undocumented)
     KEY_LOADING = "hlsKeyLoading",
+    // (undocumented)
+    KEY_STATUS_CHANGED = "hlsKeyStatusChanged",
     // (undocumented)
     LEVEL_LOADED = "hlsLevelLoaded",
     // (undocumented)
@@ -1803,8 +1791,6 @@ export interface HlsListeners {
     // (undocumented)
     [Events.DESTROYING]: (event: Events.DESTROYING) => void;
     // (undocumented)
-    [Events.EME_KEY_STATUS_ERROR]: (event: Events.EME_KEY_STATUS_ERROR, data: EmeKeyStatusErrorData) => void;
-    // (undocumented)
     [Events.ERROR]: (event: Events.ERROR, data: ErrorData) => void;
     // (undocumented)
     [Events.FPS_DROP]: (event: Events.FPS_DROP, data: FPSDropData) => void;
@@ -1836,6 +1822,8 @@ export interface HlsListeners {
     [Events.KEY_LOADED]: (event: Events.KEY_LOADED, data: KeyLoadedData) => void;
     // (undocumented)
     [Events.KEY_LOADING]: (event: Events.KEY_LOADING, data: KeyLoadingData) => void;
+    // (undocumented)
+    [Events.KEY_STATUS_CHANGED]: (event: Events.KEY_STATUS_CHANGED, data: KeyStatusChangedData) => void;
     // (undocumented)
     [Events.LEVEL_LOADED]: (event: Events.LEVEL_LOADED, data: LevelLoadedData) => void;
     // (undocumented)
@@ -2014,6 +2002,16 @@ export interface KeyLoadedData {
 export interface KeyLoadingData {
     // (undocumented)
     frag: Fragment;
+}
+
+// Warning: (ae-missing-release-tag) "KeyStatusChangedData" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)
+//
+// @public (undocumented)
+export interface KeyStatusChangedData {
+    // (undocumented)
+    keyStatuses: MediaKeyStatusMap;
+    // (undocumented)
+    keySystem: string;
 }
 
 // Warning: (ae-missing-release-tag) "KeySystemFormats" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)

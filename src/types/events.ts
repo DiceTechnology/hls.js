@@ -206,10 +206,9 @@ export interface VideoPtsNeededData {
   cc: number;
 }
 
-export interface EmeKeyStatusErrorData {
+export interface KeyStatusChangedData {
   keySystem: string;
-  keyId: string;
-  keyStatus: MediaKeyStatus;
+  keyStatuses: MediaKeyStatusMap;
 }
 
 export interface AudioTrackSwitchingData extends MediaPlaylist {}

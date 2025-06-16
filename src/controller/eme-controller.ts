@@ -852,7 +852,7 @@ class EMEController implements ComponentAPI {
         this.renewKeySession(context);
       }
 
-      this.hls.trigger(Events.KEY_STATUS_CHANGED, {
+      this.hls.trigger(Events.KEY_STATUSES_CHANGED, {
         keySystem: context.decryptdata.keyFormat,
         keyStatuses: keySession.keyStatuses,
       });

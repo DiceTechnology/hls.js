@@ -1133,7 +1133,7 @@ export type {
   BufferFlushingData,
   CuesParsedData,
   ErrorData,
-  KeyStatusChangedData,
+  KeyStatusesChangedData,
   FPSDropData,
   FPSDropLevelCappingData,
   FragBufferedData,

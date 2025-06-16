@@ -1406,10 +1406,10 @@ function parsePssh(view: DataView): PsshData | PsshInvalidResult {
 
   let kids: null | Uint8Array[] = null;
   let data: null | Uint8Array = null;
-  let dataSizeOrKidCountOffset = 0;
+  let dataSizeOffset = 0;
 
   if (version === 0) {
-    dataSizeOrKidCountOffset = 28;
+    dataSizeOffset = 28;
   } else if (version === 1) {
     const kidCounts = view.getUint32(28);
     if (!kidCounts || length < 32 + kidCounts * 16) {
@@ -1419,20 +1419,20 @@ function parsePssh(view: DataView): PsshData | PsshInvalidResult {
     for (let i = 0; i < kidCounts; i++) {
       kids.push(new Uint8Array(buffer, offset + 32 + i * 16, 16));
     }
-    dataSizeOrKidCountOffset = 32 + kidCounts * 16;
+    dataSizeOffset = 32 + kidCounts * 16;
   }
 
-  if (!dataSizeOrKidCountOffset) {
+  if (!dataSizeOffset) {
     return { offset, size };
   }
 
-  const dataSizeOrKidCount = view.getUint32(dataSizeOrKidCountOffset);
+  const dataSizeOrKidCount = view.getUint32(dataSizeOffset);
   if (size - 32 < dataSizeOrKidCount) {
     return { offset, size };
   }
   data = new Uint8Array(
     buffer,
-    offset + dataSizeOrKidCountOffset + 4,
+    offset + dataSizeOffset + 4,
     dataSizeOrKidCount,
   );
   return {

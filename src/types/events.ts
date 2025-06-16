@@ -206,7 +206,7 @@ export interface VideoPtsNeededData {
   cc: number;
 }
 
-export interface KeyStatusChangedData {
+export interface KeyStatusesChangedData {
   keySystem: string;
   keyStatuses: MediaKeyStatusMap;
 }

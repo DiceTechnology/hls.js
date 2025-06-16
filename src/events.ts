@@ -173,7 +173,7 @@ export enum Events {
   // fired when audio stream controller is stuck and requires video PTS to be available for a continuity
   VIDEO_PTS_NEEDED = 'hlsVideoPtsNeeded',
   // HD DRM
-  KEY_STATUSES_CHANGED = 'hlsKeyStatusChanged',
+  KEY_STATUSES_CHANGED = 'hlsKeyStatusesChanged',
 }
 
 /**

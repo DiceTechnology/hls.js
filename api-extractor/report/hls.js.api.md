@@ -1221,7 +1221,7 @@ export enum Events {
     // (undocumented)
     KEY_LOADING = "hlsKeyLoading",
     // (undocumented)
-    KEY_STATUSES_CHANGED = "hlsKeyStatusChanged",
+    KEY_STATUSES_CHANGED = "hlsKeyStatusesChanged",
     // (undocumented)
     LEVEL_LOADED = "hlsLevelLoaded",
     // (undocumented)

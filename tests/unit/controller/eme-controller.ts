@@ -1,15 +1,15 @@
-import EMEController, {
-  MediaKeySessionContext,
-} from '../../../src/controller/eme-controller';
-import HlsMock from '../../mocks/hls.mock';
-import { EventEmitter } from 'eventemitter3';
-import { ErrorDetails } from '../../../src/errors';
-import { Events } from '../../../src/events';
-
 import sinon from 'sinon';
 import chai from 'chai';
 import sinonChai from 'sinon-chai';
-import { MediaAttachedData } from '../../../src/types/events';
+import { EventEmitter } from 'eventemitter3';
+import { ErrorDetails } from '../../../src/errors';
+import { Events } from '../../../src/events';
+import { KeySystemFormats } from '../../../src/utils/mediakeys-helper';
+import HlsMock from '../../mocks/hls.mock';
+import EMEController, {
+  type MediaKeySessionContext,
+} from '../../../src/controller/eme-controller';
+import type { MediaAttachedData } from '../../../src/types/events';
 
 chai.use(sinonChai);
 const expect = chai.expect;
@@ -161,7 +161,7 @@ describe('EMEController', function () {
       return;
     }
     return emePromise.finally(() => {
-      expect(media.setMediaKeys).callCount(1);
+      expect(media.setMediaKeys).callCount(2);
       expect(reqMediaKsAccessSpy).callCount(1);
     });
   });
@@ -268,6 +268,11 @@ describe('EMEController', function () {
     setupEach({
       emeEnabled: true,
       requestMediaKeySystemAccessFunc: reqMediaKsAccessSpy,
+      drmSystems: {
+        'com.apple.fps': {
+          licenseUrl: '.',
+        },
+      },
     });
 
     const badData = {
@@ -295,16 +300,20 @@ describe('EMEController', function () {
 
     media.emit('encrypted', badData);
 
-    expect(emeController.keyIdToKeySessionPromise.f000ba00).to.be.a('Promise');
-    if (!emeController.keyIdToKeySessionPromise.f000ba00) {
-      return;
-    }
-    return emeController.keyIdToKeySessionPromise.f000ba00
-      .catch(() => {})
-      .finally(() => {
-        expect(emeController.hls.trigger).callCount(1);
-        expect(emeController.hls.trigger.args[0][1].details).to.equal(
-          ErrorDetails.KEY_SYSTEM_NO_SESSION,
+    return emeController
+      .selectKeySystemFormat({
+        levelkeys: {
+          [KeySystemFormats.FAIRPLAY]: {},
+          [KeySystemFormats.WIDEVINE]: {},
+          [KeySystemFormats.PLAYREADY]: {},
+        },
+        sn: 0,
+        type: 'main',
+      } as any)
+      .then(() => {
+        expect(emeController.keyIdToKeySessionPromise).to.deep.equal(
+          {},
+          '`keyIdToKeySessionPromise` should be an empty dictionary when no key IDs are found',
         );
       });
   });

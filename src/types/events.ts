@@ -32,6 +32,7 @@ import type { KeyLoaderInfo } from '../loader/key-loader';
 import type { LevelKey } from '../loader/level-key';
 import type { IErrorAction } from '../controller/error-controller';
 import type { SteeringManifest } from '../controller/content-steering-controller';
+import type { KeySystems } from '../utils/mediakeys-helper';
 
 export interface MediaAttachingData {
   media: HTMLMediaElement;
@@ -203,6 +204,11 @@ export interface LevelPTSUpdatedData {
 
 export interface VideoPtsNeededData {
   cc: number;
+}
+
+export interface KeyStatusesChangedData {
+  keySystem: string;
+  keyStatuses: MediaKeyStatusMap;
 }
 
 export interface AudioTrackSwitchingData extends MediaPlaylist {}

@@ -1416,7 +1416,13 @@ export default class BaseStreamController
               ? 'outside'
               : 'too far from the end';
           this.warn(
-            `Playback: ${currentTime.toFixed(3)} is located ${reason} of live sliding playlist: ${start.toFixed(3)} - ${end.toFixed(3)}, reset currentTime to : ${liveSyncPosition.toFixed(3)}`,
+            `Playback: ${currentTime.toFixed(
+              3,
+            )} is located ${reason} of live sliding playlist: ${start.toFixed(
+              3,
+            )} - ${end.toFixed(
+              3,
+            )}, reset currentTime to : ${liveSyncPosition.toFixed(3)}`,
           );
           media.currentTime = liveSyncPosition;
         }

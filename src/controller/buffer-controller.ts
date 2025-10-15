@@ -17,6 +17,7 @@ import {
   isCompatibleTrackChange,
   isManagedMediaSource,
 } from '../utils/mediasource-helper';
+import { fakeEncryption } from '../utils/mp4-tools';
 import { stringify } from '../utils/safe-json-stringify';
 import type { FragmentTracker } from './fragment-tracker';
 import type { HlsConfig } from '../config';
@@ -855,7 +856,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
             this.updateTimestampOffset(sb, offset, 0.000001, type, sn, cc);
           }
         }
-        this.appendExecutor(data, type);
+        this.appendExecutor(data, type, sn === 'initSegment');
       },
       onStart: () => {
         // logger.debug(`[buffer-controller]: ${type} SourceBuffer updatestart`);
@@ -1681,6 +1682,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
   private appendExecutor(
     data: Uint8Array<ArrayBuffer>,
     type: SourceBufferName,
+    isInitSegment?: boolean,
   ) {
     const track = this.tracks[type];
     const sb = track?.buffer;
@@ -1691,6 +1693,14 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
     }
     track.ending = false;
     track.ended = false;
+
+    if (
+      isInitSegment &&
+      this.hls.config.requiresEncryptionInfoInAllInitSegments
+    ) {
+      data = fakeEncryption(data) as Uint8Array<ArrayBuffer>;
+    }
+
     sb.appendBuffer(data);
   }
 

@@ -1558,8 +1558,13 @@ export function fakeEncryption(initSegment: Uint8Array) {
       // not clear why this is necessary on Xbox One, but it seems to be evidence
       // of another bug in the firmware implementation of MediaSource & EME.
       // TODO: needs more tests
-      newEntries.push(encEntry);
-      newEntries.push(entry);
+      if (navigator.userAgent.match(/Edge?\//)) {
+        newEntries.push(encEntry);
+        newEntries.push(entry);
+      } else {
+        newEntries.push(entry);
+        newEntries.push(encEntry);
+      }
     } else {
       newEntries.push(entry);
     }
@@ -1649,10 +1654,7 @@ export function fakeEncryption(initSegment: Uint8Array) {
   // patched one, otherwise video element throws following error:
   // CHUNK_DEMUXER_ERROR_APPEND_FAILED: Sample encryption info is not
   // available.
-  const isLegacyEdge = navigator.userAgent.includes('Edge/');
-  const result = navigator.userAgent.match(/Edg\/(\d+)/i);
-  const edgeVersion = result ? parseInt(result[1]) : 0;
-  if (edgeVersion > 0 || isLegacyEdge) {
+  if (navigator.userAgent.match(/Edge?\//)) {
     return appendUint8Array(modifiedInitSegment, initSegment);
   } else {
     return modifiedInitSegment;

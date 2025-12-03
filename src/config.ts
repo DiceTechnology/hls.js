@@ -152,6 +152,7 @@ export type LevelControllerConfig = {
 export type MP4RemuxerConfig = {
   stretchShortVideoTrack: boolean;
   maxAudioFramesDrift: number;
+  preventNegativeStartDts: boolean;
 };
 
 export interface PlaylistLoaderConstructor {
@@ -420,6 +421,7 @@ export const hlsDefaultConfig: HlsConfig = {
   fpsController: FPSController,
   stretchShortVideoTrack: false, // used by mp4-remuxer
   maxAudioFramesDrift: 1, // used by mp4-remuxer
+  preventNegativeStartDts: false, // used by mp4-remuxer
   forceKeyFrameOnDiscontinuity: true, // used by ts-demuxer
   abrEwmaFastLive: 3, // used by abr-controller
   abrEwmaSlowLive: 9, // used by abr-controller

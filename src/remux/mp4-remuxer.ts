@@ -814,12 +814,15 @@ export default class MP4Remuxer extends Logger implements Remuxer {
       }),
     );
     const type: SourceBufferName = 'video';
+    const startDTS = (firstDTS - initTime) / timeScale;
     const data = {
       data1: moof,
       data2: mdat,
       startPTS: (minPTS - initTime) / timeScale,
       endPTS: (maxPTS + mp4SampleDuration - initTime) / timeScale,
-      startDTS: (firstDTS - initTime) / timeScale,
+      startDTS: this.config.preventNegativeStartDts
+        ? Math.max(startDTS, 0)
+        : startDTS,
       endDTS: nextVideoTs / timeScale,
       type,
       hasAudio: false,

@@ -4127,6 +4127,7 @@ export enum MetadataSchema {
 export type MP4RemuxerConfig = {
     stretchShortVideoTrack: boolean;
     maxAudioFramesDrift: number;
+    preventNegativeStartDts: boolean;
 };
 
 // Warning: (ae-missing-release-tag) "NetworkComponentAPI" is part of the package's API, but it is missing a release tag (@alpha, @beta, @public, or @internal)

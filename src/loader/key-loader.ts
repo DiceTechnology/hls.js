@@ -8,6 +8,7 @@ import {
   keySystemFormatToKeySystemDomain,
 } from '../utils/mediakeys-helper';
 import { KeySystemFormats } from '../utils/mediakeys-helper';
+import { parseKeyIdsFromTenc } from '../utils/mp4-tools';
 import type { LevelKey } from './level-key';
 import type { HlsConfig } from '../config';
 import type EMEController from '../controller/eme-controller';

@@ -12,6 +12,7 @@ import { Events } from '../events';
 import { PlaylistContextType, PlaylistLevelType } from '../types/loader';
 import { AttrList } from '../utils/attr-list';
 import { computeReloadInterval } from '../utils/level-helper';
+import { patchLevelDetailsForPlayReadyDrm } from '../utils/playready-workaround';
 import type { LevelDetails } from './level-details';
 import type { LoaderConfig, RetryConfig } from '../config';
 import type Hls from '../hls';
@@ -524,6 +525,10 @@ class PlaylistLoader implements NetworkComponentAPI {
       0,
       this.variableList,
     );
+
+    if (hls.config.requiresEncryptionInfoInAllInitSegments) {
+      patchLevelDetailsForPlayReadyDrm(levelDetails);
+    }
 
     // We have done our first request (Manifest-type) and receive
     // not a master playlist but a chunk-list (track/level)

@@ -17,7 +17,6 @@ import {
   isCompatibleTrackChange,
   isManagedMediaSource,
 } from '../utils/mediasource-helper';
-import { fakeEncryption } from '../utils/mp4-tools';
 import { stringify } from '../utils/safe-json-stringify';
 import type { FragmentTracker } from './fragment-tracker';
 import type { HlsConfig } from '../config';
@@ -1683,13 +1682,6 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
     }
     track.ending = false;
     track.ended = false;
-
-    if (
-      isInitSegment &&
-      this.hls.config.requiresEncryptionInfoInAllInitSegments
-    ) {
-      data = fakeEncryption(data) as Uint8Array<ArrayBuffer>;
-    }
 
     sb.appendBuffer(data);
   }

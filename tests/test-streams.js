@@ -38,7 +38,7 @@ function getLicenseAuthToken() {
           aid: 'a25cb2dd-afd3-40a9-ae23-6ea4fed33354',
           did: 'c2ee36fd-e7d7-436f-915a-37ea456f4d16',
           def: 'uhd2',
-          // mhd: 'hd',
+          mhd: 'hd',
         },
       }),
     },
@@ -328,7 +328,7 @@ module.exports = {
           licenseUrl: 'https://shield-drm.imggaming.com/api/v2/license',
         },
       },
-      licenseXhrSetup: async function (xhr, url, keyContext, licenseChallenge) {
+      licenseXhrSetup: async function (xhr) {
         const { token } = await getLicenseAuthToken();
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         xhr.setRequestHeader(
@@ -380,13 +380,17 @@ module.exports = {
     },
     {
       emeEnabled: true,
-      requiresEncryptionInfoInAllInitSegments: true,
       drmSystems: {
         'com.microsoft.playready': {
           licenseUrl: 'https://shield-drm.imggaming.com/api/v2/license',
         },
       },
-      licenseXhrSetup: async function (xhr, url, keyContext, licenseChallenge) {
+      drmSystemOptions: {
+        videoRobustness: '3000',
+        audioRobustness: '2000',
+      },
+      requiresEncryptionInfoInAllInitSegments: true,
+      licenseXhrSetup: async function (xhr) {
         const { token } = await getLicenseAuthToken();
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         xhr.setRequestHeader(
@@ -407,7 +411,7 @@ module.exports = {
   ),
   issue7413_widevine_clear_to_drm: createTestStreamWithConfig(
     {
-      url: 'https://sample-videos-zyrkp2nj.s3.eu-west-1.amazonaws.com/big-buck-bunny-fmp4-cbcs-clear-to-drm/ref/master_clear_to_drm_348000.m3u8',
+      url: 'https://sample-videos-zyrkp2nj.s3.eu-west-1.amazonaws.com/big-buck-bunny-fmp4-cbcs-clear-to-drm/ref/master_clear_to_drm.m3u8',
       description: '#7413 widevine clear to drm',
       abr: true,
       skip_ua: ['firefox', 'safari'],
@@ -419,7 +423,7 @@ module.exports = {
           licenseUrl: 'https://shield-drm.imggaming.com/api/v2/license',
         },
       },
-      licenseXhrSetup: async function (xhr, url, keyContext, licenseChallenge) {
+      licenseXhrSetup: async function (xhr) {
         const { token } = await getLicenseAuthToken();
         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         xhr.setRequestHeader(
@@ -429,10 +433,10 @@ module.exports = {
       },
     },
   ),
-  issue7413_widevine_clear_to_drm_shaka: createTestStreamWithConfig(
+  issue7413_widevine_multi_single_key_pssh: createTestStreamWithConfig(
     {
-      url: 'https://storage.googleapis.com/shaka-demo-assets/angel-one-widevine-hls/hls.m3u8',
-      description: '#7413 widevine clear to drm shaka',
+      url: 'https://sample-videos-zyrkp2nj.s3-eu-west-1.amazonaws.com/big-buck-bunny-variants/30fps-multi-key/hls_fmp4_cenc_pw_single_key_pssh/master.m3u8',
+      description: '#7413 widevine multi single key',
       abr: true,
       skip_ua: ['firefox', 'safari'],
     },
@@ -440,8 +444,16 @@ module.exports = {
       emeEnabled: true,
       drmSystems: {
         'com.widevine.alpha': {
-          licenseUrl: 'https://cwip-shaka-proxy.appspot.com/no_auth',
+          licenseUrl: 'https://shield-drm.imggaming.com/api/v2/license',
         },
+      },
+      licenseXhrSetup: async function (xhr) {
+        const { token } = await getLicenseAuthToken();
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.setRequestHeader(
+          'x-drm-info',
+          'eyJzeXN0ZW0iOiJjb20ud2lkZXZpbmUuYWxwaGEifQ==',
+        );
       },
     },
   ),

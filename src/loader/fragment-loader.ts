@@ -105,7 +105,7 @@ export default class FragmentLoader {
             payload = payload.slice(16);
           }
           if (
-            hls.config.requiresEncryptionInfoInAllInitSegments &&
+            this.config.requiresEncryptionInfoInAllInitSegments &&
             frag.sn === 'initSegment'
           ) {
             payload = fakeEncryption(new Uint8Array(payload))

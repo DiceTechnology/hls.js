@@ -857,7 +857,7 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
             this.updateTimestampOffset(sb, offset, 0.000001, type, sn, cc);
           }
         }
-        this.appendExecutor(data, type, sn === 'initSegment');
+        this.appendExecutor(data, type);
       },
       onStart: () => {
         // logger.debug(`[buffer-controller]: ${type} SourceBuffer updatestart`);
@@ -1683,7 +1683,6 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
   private appendExecutor(
     data: Uint8Array<ArrayBuffer>,
     type: SourceBufferName,
-    isInitSegment?: boolean,
   ) {
     const track = this.tracks[type];
     const sb = track?.buffer;
@@ -1694,7 +1693,6 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
     }
     track.ending = false;
     track.ended = false;
-
     sb.appendBuffer(data);
   }
 

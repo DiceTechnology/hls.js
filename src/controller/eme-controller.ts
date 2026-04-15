@@ -980,6 +980,7 @@ class EMEController extends Logger implements ComponentAPI {
           'buffer' in keyId
             ? new Uint8Array(keyId.buffer, keyId.byteOffset, keyId.byteLength)
             : new Uint8Array(keyId);
+
         if (
           mediaKeySessionContext.keySystem === KeySystems.PLAYREADY &&
           keyIdArray.length === 16
@@ -1000,6 +1001,7 @@ class EMEController extends Logger implements ComponentAPI {
         this.log(
           `key status change "${status}" for keyStatuses keyId: ${keyIdWithStatusChange} key-session "${mediaKeySessionContext.mediaKeysSession.sessionId}"`,
         );
+
         keyStatuses[keyIdWithStatusChange] = status;
       },
     );

@@ -442,7 +442,7 @@ export const hlsDefaultConfig: HlsConfig = {
     ? requestMediaKeySystemAccess
     : null, // used by eme-controller
   requireKeySystemAccessOnStart: false, // used by eme-controller
-  requiresEncryptionInfoInAllInitSegments: false, // used by buffer-controller
+  requiresEncryptionInfoInAllInitSegments: false,
   testBandwidth: true,
   progressive: false,
   lowLatencyMode: true,

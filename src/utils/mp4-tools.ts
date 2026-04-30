@@ -569,9 +569,9 @@ function addLeadingZero(num: number): string {
 export function patchEncyptionData(
   initSegment: Uint8Array<ArrayBuffer> | undefined,
   decryptdata: DecryptData | null,
-) {
+): Uint8Array<ArrayBuffer> | undefined {
   if (!initSegment || !decryptdata) {
-    return;
+    return initSegment;
   }
   const keyId = decryptdata.keyId;
   if (keyId && decryptdata.isCommonEncryption) {
@@ -588,6 +588,7 @@ export function patchEncyptionData(
       }
     });
   }
+  return initSegment;
 }
 /**
  * Takes a clear init segment and returns a new one where every avc1 sample entry is wrapped

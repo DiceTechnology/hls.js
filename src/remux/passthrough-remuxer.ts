@@ -5,7 +5,7 @@ import {
 import { ElementaryStreamTypes } from '../loader/fragment';
 import { getCodecCompatibleName } from '../utils/codecs';
 import { type ILogger, Logger } from '../utils/logger';
-import { patchEncyptionData } from '../utils/mp4-tools';
+import { fakeEncryption, patchEncyptionData } from '../utils/mp4-tools';
 import { getSampleData, parseInitSegment } from '../utils/mp4-tools';
 import type { HlsConfig } from '../config';
 import type { HlsEventEmitter } from '../events';
@@ -91,11 +91,14 @@ class PassThroughRemuxer extends Logger implements Remuxer {
       this.initData = undefined;
       return;
     }
-    const { audio, video } = (this.initData = parseInitSegment(initSegment));
-
     if (decryptdata) {
-      patchEncyptionData(initSegment, decryptdata);
+      const { audio, video } = parseInitSegment(initSegment);
+      if (!audio?.encrypted && !video?.encrypted) {
+        initSegment = fakeEncryption(initSegment);
+      }
+      initSegment = patchEncyptionData(initSegment, decryptdata) ?? initSegment;
     } else {
+      const { audio, video } = parseInitSegment(initSegment);
       const eitherTrack = audio || video;
       if (eitherTrack?.encrypted) {
         this.warn(
@@ -103,6 +106,8 @@ class PassThroughRemuxer extends Logger implements Remuxer {
         );
       }
     }
+
+    const { audio, video } = (this.initData = parseInitSegment(initSegment));
 
     // Get codec from initSegment
     if (audio) {

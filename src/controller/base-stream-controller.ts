@@ -646,6 +646,7 @@ export default class BaseStreamController
         return data;
       })
       .then((data: FragLoadedData) => {
+        console.log('$$$ _loadInitSegment - loaded init segment, checking if decryption is needed', data);
         const { hls } = this;
         const { frag, payload } = data;
         const decryptData = frag.decryptdata;
@@ -689,9 +690,11 @@ export default class BaseStreamController
                 },
               });
               data.payload = decryptedData;
+              console.log('$$$ _loadInitSegment - calling this.completeInitSegmentLoad with decrypted data', data);
               return this.completeInitSegmentLoad(data);
             });
         }
+        console.log('$$$ _loadInitSegment - calling this.completeInitSegmentLoad with non-decrypted data', data);
         return this.completeInitSegmentLoad(data);
       })
       .catch((reason) => {

@@ -589,6 +589,60 @@ export function patchEncyptionData(
     });
   }
 }
+/**
+ * Takes a clear init segment and returns a new one where every avc1 sample entry is wrapped
+ * as encv (and mp4a as enca), each with a sinf box containing frma (original codec), schm (cenc),
+ * and schi/tenc. The tenc needs default_isProtected=1 and default_Per_Sample_IV_Size=8 from the
+ * start (step 3 is baked into this).
+ */
+export function fakeEncryption(clearInitSegment: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+  console.log('[eme] Generating fake encrypted init segment', clearInitSegment);
+  const result = clearInitSegment.slice();
+  const traks = findBox(result, ['moov', 'trak']);
+  traks.forEach((trak) => {
+    const stsd = findBox(trak, [
+      'mdia',
+      'minf',
+      'stbl',
+      'stsd',
+    ])[0] as BoxDataOrUndefined;
+
+    if (!stsd) return;
+    const sampleEntries = stsd.subarray(8);
+    const avc1Entries = findBox(sampleEntries, ['avc1']);
+    avc1Entries.forEach((avc1) => {
+      const avc1Index = avc1.byteOffset - result.byteOffset;
+      const encv = new Uint8Array(avc1.length + 78);
+      encv.set(avc1, 78);
+      const encvIndex = avc1Index - 28;
+      writeUint32(encv, 0, encv.length + 8);
+      encv.set([0x65, 0x6e, 0x63, 0x76], 4); // 'encv'
+      const sinf = new Uint8Array(32);
+      writeUint32(sinf, 0, sinf.length + 8);
+      sinf.set([0x73, 0x69, 0x6e, 0x66], 4); // 'sinf'
+      const frma = new Uint8Array(16);
+      writeUint32(frma, 0, frma.length + 8);
+      frma.set([0x66, 0x72, 0x6d, 0x61], 4); // 'frma'
+      frma.set(avc1.subarray(4, 8), 8); // original codec fourCC
+      const schm = new Uint8Array(16);
+      writeUint32(schm, 0, schm.length + 8);
+      schm.set([0x73, 0x63, 0x68, 0x6d], 4); // 'schm'
+      schm.set([0x63, 0x65, 0x6e, 0x63], 8); // 'cenc'
+      const tenc = new Uint8Array(24);
+      writeUint32(tenc, 0, tenc.length + 8);
+      tenc.set([0x73, 0x63, 0x68, 0x69], 4); // 'schi'
+      tenc.set([0x74, 0x65, 0x6e, 0x63], 8); // 'tenc'
+      tenc[16] = 1; // default_isProtected
+      tenc[17] = 8; // default_Per_Sample_IV_Size
+      sinf.set(frma, 8);
+      sinf.set(schm, 8 + frma.length);
+      sinf.set(tenc, 8 + frma.length + schm.length);
+      encv.set(sinf, 78 + avc1.length);
+      stsd.set(encv, avc1Index - 28);
+    });
+  });
+  return result;
+}
 
 export function parseKeyIdsFromTenc(
   initSegment: Uint8Array<ArrayBuffer>,

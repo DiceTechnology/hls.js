@@ -73,8 +73,10 @@ class PassThroughRemuxer extends Logger implements Remuxer {
     videoCodec: string | undefined,
     decryptdata: DecryptData | null,
   ) {
+    console.log('$$$ PassThroughRemuxer - resetInitSegment called with audioCodec', audioCodec, 'videoCodec', videoCodec, 'decryptdata', JSON.stringify(decryptdata));
     this.audioCodec = audioCodec;
     this.videoCodec = videoCodec;
+    // if (decryptdata) decryptdata.keyFormat = "com.microsoft.playready.recommendation";
     this.generateInitSegment(initSegment, decryptdata);
     this.emitInitSegment = true;
   }

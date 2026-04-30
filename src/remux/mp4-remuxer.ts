@@ -133,6 +133,7 @@ export default class MP4Remuxer extends Logger implements Remuxer {
   }
 
   resetInitSegment() {
+    console.log('$$$ MP4Remuxer - resetInitSegment called with audioCodec');
     this.log('ISGenerated flag reset');
     this.ISGenerated = false;
     this.videoTrackConfig = undefined;

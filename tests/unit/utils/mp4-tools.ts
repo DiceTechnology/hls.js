@@ -82,7 +82,7 @@ describe('fakeEncryption', function () {
         'stsd',
       ])[0];
       // sampleEntries starts at stsd+8 (skipping stsd version/flags)
-      debugger;
+
       const sampleEntries = stsd.subarray(8);
       const fourCC = bin2str(sampleEntries.subarray(4, 8));
       expect(fourCC).to.equal('encv');

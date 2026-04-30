@@ -596,52 +596,151 @@ export function patchEncyptionData(
  * start (step 3 is baked into this).
  */
 export function fakeEncryption(clearInitSegment: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-  console.log('[eme] Generating fake encrypted init segment', clearInitSegment);
-  const result = clearInitSegment.slice();
-  const traks = findBox(result, ['moov', 'trak']);
-  traks.forEach((trak) => {
+  const base = clearInitSegment.byteOffset;
+
+  // Collect codec boxes that need to be replaced (avc1→encv, mp4a→enca).
+  // Each entry records the original box position (including its 8-byte header) and the
+  // full replacement box so we can stitch a new, correctly-sized buffer.
+  const replacements: Array<{
+    boxStart: number; // offset of original box header in clearInitSegment
+    boxSize: number; // total original box size (header + content)
+    newBox: Uint8Array;
+  }> = [];
+
+  findBox(clearInitSegment, ['moov', 'trak']).forEach((trak) => {
     const stsd = findBox(trak, [
       'mdia',
       'minf',
       'stbl',
       'stsd',
     ])[0] as BoxDataOrUndefined;
-
     if (!stsd) return;
     const sampleEntries = stsd.subarray(8);
-    const avc1Entries = findBox(sampleEntries, ['avc1']);
-    avc1Entries.forEach((avc1) => {
-      const avc1Index = avc1.byteOffset - result.byteOffset;
-      const encv = new Uint8Array(avc1.length + 78);
-      encv.set(avc1, 78);
-      const encvIndex = avc1Index - 28;
-      writeUint32(encv, 0, encv.length + 8);
-      encv.set([0x65, 0x6e, 0x63, 0x76], 4); // 'encv'
-      const sinf = new Uint8Array(32);
-      writeUint32(sinf, 0, sinf.length + 8);
-      sinf.set([0x73, 0x69, 0x6e, 0x66], 4); // 'sinf'
-      const frma = new Uint8Array(16);
-      writeUint32(frma, 0, frma.length + 8);
-      frma.set([0x66, 0x72, 0x6d, 0x61], 4); // 'frma'
-      frma.set(avc1.subarray(4, 8), 8); // original codec fourCC
-      const schm = new Uint8Array(16);
-      writeUint32(schm, 0, schm.length + 8);
-      schm.set([0x73, 0x63, 0x68, 0x6d], 4); // 'schm'
-      schm.set([0x63, 0x65, 0x6e, 0x63], 8); // 'cenc'
-      const tenc = new Uint8Array(24);
-      writeUint32(tenc, 0, tenc.length + 8);
-      tenc.set([0x73, 0x63, 0x68, 0x69], 4); // 'schi'
-      tenc.set([0x74, 0x65, 0x6e, 0x63], 8); // 'tenc'
-      tenc[16] = 1; // default_isProtected
-      tenc[17] = 8; // default_Per_Sample_IV_Size
-      sinf.set(frma, 8);
-      sinf.set(schm, 8 + frma.length);
-      sinf.set(tenc, 8 + frma.length + schm.length);
-      encv.set(sinf, 78 + avc1.length);
-      stsd.set(encv, avc1Index - 28);
+
+    findBox(sampleEntries, ['avc1']).forEach((avc1) => {
+      replacements.push({
+        boxStart: avc1.byteOffset - base - 8,
+        boxSize: avc1.length + 8,
+        newBox: buildEncBox(avc1, [0x65, 0x6e, 0x63, 0x76], [0x61, 0x76, 0x63, 0x31]), // encv, avc1
+      });
+    });
+    findBox(sampleEntries, ['mp4a']).forEach((mp4a) => {
+      replacements.push({
+        boxStart: mp4a.byteOffset - base - 8,
+        boxSize: mp4a.length + 8,
+        newBox: buildEncBox(mp4a, [0x65, 0x6e, 0x63, 0x61], [0x6d, 0x70, 0x34, 0x61]), // enca, mp4a
+      });
     });
   });
+
+  // Already encrypted (or no recognised codec entries) — return unchanged.
+  if (replacements.length === 0) return clearInitSegment;
+  replacements.sort((a, b) => a.boxStart - b.boxStart);
+
+  // Build a new buffer by stitching the original with each codec box replaced.
+  const totalExtra = replacements.reduce(
+    (sum, r) => sum + r.newBox.length - r.boxSize,
+    0,
+  );
+  const result = new Uint8Array(
+    clearInitSegment.length + totalExtra,
+  ) as Uint8Array<ArrayBuffer>;
+
+  let srcPos = 0;
+  let dstPos = 0;
+  replacements.forEach((r) => {
+    result.set(clearInitSegment.subarray(srcPos, r.boxStart), dstPos);
+    dstPos += r.boxStart - srcPos;
+    result.set(r.newBox, dstPos);
+    dstPos += r.newBox.length;
+    srcPos = r.boxStart + r.boxSize;
+  });
+  result.set(clearInitSegment.subarray(srcPos), dstPos);
+
+  // Patch the size fields of every ancestor box (moov → trak → mdia → minf → stbl → stsd).
+  // Ancestor boxes always begin before their descendants, so a box at original position P
+  // sits at P + (sum of deltas from replacements that came before P) in the new buffer.
+  [
+    ['moov'],
+    ['moov', 'trak'],
+    ['moov', 'trak', 'mdia'],
+    ['moov', 'trak', 'mdia', 'minf'],
+    ['moov', 'trak', 'mdia', 'minf', 'stbl'],
+    ['moov', 'trak', 'mdia', 'minf', 'stbl', 'stsd'],
+  ].forEach((path) => {
+    findBox(clearInitSegment, path).forEach((box) => {
+      const origStart = box.byteOffset - base - 8;
+      const origEnd = origStart + box.length + 8;
+      let delta = 0;
+      let priorShift = 0;
+      replacements.forEach((r) => {
+        if (r.boxStart < origStart) priorShift += r.newBox.length - r.boxSize;
+        if (r.boxStart >= origStart && r.boxStart + r.boxSize <= origEnd)
+          delta += r.newBox.length - r.boxSize;
+      });
+      if (delta !== 0) {
+        const newStart = origStart + priorShift;
+        writeUint32(result, newStart, readUint32(result, newStart) + delta);
+      }
+    });
+  });
+
   return result;
+}
+
+// Builds a full enc box (encv or enca) wrapping the original codec content plus a sinf.
+// codecContent is the box content returned by findBox (no header).
+// encFourCC / origFourCC are 4-byte arrays of char codes.
+function buildEncBox(
+  codecContent: Uint8Array,
+  encFourCC: number[],
+  origFourCC: number[],
+): Uint8Array {
+  const sinf = buildSinf(origFourCC);
+  const box = new Uint8Array(8 + codecContent.length + sinf.length);
+  writeUint32(box, 0, box.length);
+  box.set(encFourCC, 4);
+  box.set(codecContent, 8);
+  box.set(sinf, 8 + codecContent.length);
+  return box;
+}
+
+// Builds an 80-byte sinf box: frma(12) + schm(20) + schi(40).
+function buildSinf(origFourCC: number[]): Uint8Array {
+  // frma: [size=12][frma][original_format]
+  const frma = new Uint8Array(12);
+  writeUint32(frma, 0, 12);
+  frma.set([0x66, 0x72, 0x6d, 0x61], 4); // 'frma'
+  frma.set(origFourCC, 8);
+
+  // schm: [size=20][schm][version/flags=0][scheme_type=cenc][scheme_version=0x00010000]
+  const schm = new Uint8Array(20);
+  writeUint32(schm, 0, 20);
+  schm.set([0x73, 0x63, 0x68, 0x6d], 4); // 'schm'
+  schm.set([0x63, 0x65, 0x6e, 0x63], 12); // 'cenc' at content bytes 4–7
+  schm.set([0x00, 0x01, 0x00, 0x00], 16); // scheme_version = 1.0
+
+  // tenc: [size=32][tenc][v/f=0][reserved=0,0][isProtected=1][IV_size=8][KID=16×0]
+  const tenc = new Uint8Array(32);
+  writeUint32(tenc, 0, 32);
+  tenc.set([0x74, 0x65, 0x6e, 0x63], 4); // 'tenc'
+  tenc[14] = 1; // default_isProtected — content byte 6
+  tenc[15] = 8; // default_Per_Sample_IV_Size — content byte 7
+
+  // schi: [size=40][schi][tenc(32)]
+  const schi = new Uint8Array(40);
+  writeUint32(schi, 0, 40);
+  schi.set([0x73, 0x63, 0x68, 0x69], 4); // 'schi'
+  schi.set(tenc, 8);
+
+  // sinf: [size=80][sinf][frma(12)][schm(20)][schi(40)]
+  const sinf = new Uint8Array(80);
+  writeUint32(sinf, 0, 80);
+  sinf.set([0x73, 0x69, 0x6e, 0x66], 4); // 'sinf'
+  sinf.set(frma, 8);
+  sinf.set(schm, 20);
+  sinf.set(schi, 40);
+  return sinf;
 }
 
 export function parseKeyIdsFromTenc(

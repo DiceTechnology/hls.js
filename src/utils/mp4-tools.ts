@@ -1,5 +1,6 @@
 import { utf8ArrayToStr } from '@svta/common-media-library/utils/utf8ArrayToStr';
 import { arrayToHex } from './hex';
+import { KeySystemFormats } from './mediakeys-helper';
 import { ElementaryStreamTypes } from '../loader/fragment';
 import { logger } from '../utils/logger';
 import type { KeySystemIds } from './mediakeys-helper';
@@ -573,8 +574,13 @@ export function patchEncyptionData(
   if (!initSegment || !decryptdata) {
     return initSegment;
   }
-  const keyId = decryptdata.keyId;
+  const { keyId } = decryptdata;
   if (keyId && decryptdata.isCommonEncryption) {
+    // PlayReady key IDs are LE GUIDs; tenc default_KID must be a BE UUID.
+    const effectiveKeyId =
+      decryptdata.keyFormat === KeySystemFormats.PLAYREADY
+        ? leGuidToUuid(keyId)
+        : keyId;
     applyToTencBoxes(initSegment, (tenc, isAudio) => {
       // Look for default key id (keyID offset is always 8 within the tenc box):
       const tencKeyId = tenc.subarray(8, 24);
@@ -582,13 +588,31 @@ export function patchEncyptionData(
         logger.log(
           `[eme] Patching keyId in 'enc${
             isAudio ? 'a' : 'v'
-          }>sinf>>tenc' box: ${arrayToHex(tencKeyId)} -> ${arrayToHex(keyId)}`,
+          }>sinf>>tenc' box: ${arrayToHex(tencKeyId)} -> ${arrayToHex(effectiveKeyId)}`,
         );
-        tenc.set(keyId, 8);
+        tenc.set(effectiveKeyId, 8);
       }
     });
   }
   return initSegment;
+}
+
+// PlayReady key IDs are LE GUIDs (Data1/2/3 stored little-endian).
+// CENC tenc default_KID requires a standard big-endian UUID.
+// Swap the first three groups: bytes 0-3, bytes 4-5, bytes 6-7.
+function leGuidToUuid(
+  guid: Uint8Array<ArrayBuffer>,
+): Uint8Array<ArrayBuffer> {
+  const uuid = new Uint8Array(guid) as Uint8Array<ArrayBuffer>;
+  uuid[0] = guid[3];
+  uuid[1] = guid[2];
+  uuid[2] = guid[1];
+  uuid[3] = guid[0];
+  uuid[4] = guid[5];
+  uuid[5] = guid[4];
+  uuid[6] = guid[7];
+  uuid[7] = guid[6];
+  return uuid;
 }
 /**
  * Takes a clear init segment and returns a new one where every avc1 sample entry is wrapped

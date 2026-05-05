@@ -28,9 +28,37 @@ if (demoConfig) {
 
 const hlsjsDefaults = {
   debug: true,
-  enableWorker: true,
+  enableWorker: false,
   lowLatencyMode: true,
   backBufferLength: 60 * 1.5,
+  emeEnabled: true,
+  drmSystems: {
+    "com.microsoft.playready": {
+      licenseUrl: "https://shield-drm.imggaming.com/api/v2/license"
+    }
+  },
+  drmSystemOptions: {
+    "videoRobustness": "3000",
+    "audioRobustness": "3000"
+  },
+  licenseXhrSetup: async function(xhr) {
+    const res = await fetch("https://shield-api.imggaming.com/admin/v1/ovp/dice/client/dce.sandbox/action/sign_test_content_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ttl_seconds: 300,
+        claims: {
+        eid: "786df1e4-9a75-4052-8625-204ba23b2bae",
+        aid: "00000000-0000-0000-0000-000000000000",
+        did: "00000000-0000-0000-0000-000000000000",
+        def: "uhd2"
+        }
+      })
+    });
+    const { token } = await res.json();
+    xhr.setRequestHeader("Authorization", "Bearer " + token);
+    xhr.setRequestHeader("X-DRM-INFO", btoa(JSON.stringify({ system: "com.microsoft.playready" })));
+  }
 };
 
 let enableStreaming = getDemoConfigPropOrDefault('enableStreaming', true);

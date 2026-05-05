@@ -617,10 +617,11 @@ function leGuidToUuid(
 /**
  * Takes a clear init segment and returns a new one where every avc1 sample entry is wrapped
  * as encv (and mp4a as enca), each with a sinf box containing frma (original codec), schm (cenc),
- * and schi/tenc. The tenc needs default_isProtected=1 and default_Per_Sample_IV_Size=8 from the
- * start (step 3 is baked into this).
+ * and schi/tenc.
  */
-export function fakeEncryption(clearInitSegment: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+export function fakeEncryption(
+  clearInitSegment: Uint8Array<ArrayBuffer>
+): Uint8Array<ArrayBuffer> {
   const base = clearInitSegment.byteOffset;
 
   // Collect codec boxes that need to be replaced (avc1→encv, mp4a→enca).
@@ -745,12 +746,12 @@ function buildSinf(origFourCC: number[]): Uint8Array {
   schm.set([0x63, 0x65, 0x6e, 0x63], 12); // 'cenc' at content bytes 4–7
   schm.set([0x00, 0x01, 0x00, 0x00], 16); // scheme_version = 1.0
 
-  // tenc: [size=32][tenc][v/f=0][reserved=0,0][isProtected=1][IV_size=8][KID=16×0]
+  // tenc: [size=32][tenc][v/f=0][reserved=0,0][isProtected=0][IV_size=0][KID=16×0]
   const tenc = new Uint8Array(32);
   writeUint32(tenc, 0, 32);
   tenc.set([0x74, 0x65, 0x6e, 0x63], 4); // 'tenc'
-  tenc[14] = 1; // default_isProtected — content byte 6
-  tenc[15] = 8; // default_Per_Sample_IV_Size — content byte 7
+  tenc[14] = 0; // default_isProtected
+  tenc[15] = 0; // default_Per_Sample_IV_Size
 
   // schi: [size=40][schi][tenc(32)]
   const schi = new Uint8Array(40);
@@ -805,6 +806,21 @@ function applyToTencBoxes(
         }
       });
     });
+  });
+}
+
+export function patchTencIsProtected(
+  initSegment: Uint8Array<ArrayBuffer>,
+  encrypted: boolean,
+): void {
+  applyToTencBoxes(initSegment, (tenc) => {
+    tenc[6] = encrypted ? 1 : 0; // default_isProtected
+    if (!encrypted || tenc[7] === 0) {
+      // Only update IV_size when disabling encryption, or when it was 0
+      // (IV_size=0 means this tenc was built by buildSinf via fakeEncryption;
+      //  real packager-built tenc will have 8 or 16 here and must be preserved)
+      tenc[7] = encrypted ? 8 : 0; // default_Per_Sample_IV_Size
+    }
   });
 }
 

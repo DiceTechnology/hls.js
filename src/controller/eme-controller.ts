@@ -138,7 +138,12 @@ class EMEController extends Logger implements ComponentAPI {
 
   private getLicenseServerUrl(keySystem: KeySystems): string | undefined {
     const { drmSystems, widevineLicenseUrl } = this.config;
-    const keySystemConfiguration = drmSystems?.[keySystem];
+    // const keySystemConfiguration = drmSystems?.[keySystem];
+    const keySystemConfiguration =
+       drmSystems?.[keySystem] ??
+        (keySystem === KeySystems.PLAYREADY_RECOMMENDATION
+          ? drmSystems?.[KeySystems.PLAYREADY]
+          : undefined);
 
     if (keySystemConfiguration) {
       return keySystemConfiguration.licenseUrl;
@@ -162,8 +167,12 @@ class EMEController extends Logger implements ComponentAPI {
 
   private getServerCertificateUrl(keySystem: KeySystems): string | void {
     const { drmSystems } = this.config;
-    const keySystemConfiguration = drmSystems?.[keySystem];
-
+    // const keySystemConfiguration = drmSystems?.[keySystem];
+    const keySystemConfiguration =
+       drmSystems?.[keySystem] ??
+        (keySystem === KeySystems.PLAYREADY_RECOMMENDATION
+          ? drmSystems?.[KeySystems.PLAYREADY]
+          : undefined);
     if (keySystemConfiguration) {
       return keySystemConfiguration.serverCertificateUrl;
     } else {
@@ -439,7 +448,13 @@ class EMEController extends Logger implements ComponentAPI {
       .filter(
         (value) => !!value && keySystemsInConfig.indexOf(value) !== -1,
       ) as any as KeySystems[];
-
+    // Chrome on Windows registers PlayReady as the recommendation variant.
+    // When the standard key system is in the attempt list, add the recommendation
+    // variant as an immediate fallback so attemptKeySystemAccess tries it next.
+    // if (keySystemsToAttempt.indexOf(KeySystems.PLAYREADY) !== -1) {
+    //   const idx = keySystemsToAttempt.indexOf(KeySystems.PLAYREADY);
+    //   keySystemsToAttempt.splice(idx + 1, 0, KeySystems.PLAYREADY_RECOMMENDATION);
+    // }
     return this.selectKeySystem(keySystemsToAttempt);
   }
 
@@ -570,7 +585,7 @@ class EMEController extends Logger implements ComponentAPI {
       const keySystemsToAttempt = keySystem
         ? [keySystem]
         : getKeySystemsForConfig(this.config);
-      return this.attemptKeySystemAccess(keySystemsToAttempt);
+      return this.getKeySystemSelectionPromise(keySystemsToAttempt);
     }
     return mediaKeySessionContext;
   }
@@ -592,6 +607,15 @@ class EMEController extends Logger implements ComponentAPI {
           drmSystems: this.config.drmSystems,
         })}`,
       );
+    }
+    // Add recommendation variant as fallback if base PlayReady is in the list
+    const playreadyIdx = keySystemsToAttempt.indexOf(KeySystems.PLAYREADY);
+    if (
+      playreadyIdx !== -1 &&
+      keySystemsToAttempt.indexOf(KeySystems.PLAYREADY_RECOMMENDATION) === -1
+    ) {
+      keySystemsToAttempt = keySystemsToAttempt.slice();
+      keySystemsToAttempt.splice(playreadyIdx + 1, 0, KeySystems.PLAYREADY_RECOMMENDATION);
     }
     return this.attemptKeySystemAccess(keySystemsToAttempt);
   }
@@ -1332,7 +1356,7 @@ class EMEController extends Logger implements ComponentAPI {
 
       this.setupLicenseXHR(xhr, url, keySessionContext, licenseChallenge)
         .then(({ xhr, licenseChallenge }) => {
-          if (keySessionContext.keySystem == KeySystems.PLAYREADY) {
+          if (keySessionContext.keySystem == KeySystems.PLAYREADY || keySessionContext.keySystem == KeySystems.PLAYREADY_RECOMMENDATION) {
             licenseChallenge = this.unpackPlayReadyKeyMessage(
               xhr,
               licenseChallenge,

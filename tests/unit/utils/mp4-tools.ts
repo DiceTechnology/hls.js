@@ -134,7 +134,7 @@ describe('fakeEncryption', function () {
       expect(bin2str(schm.subarray(4, 8))).to.equal('cenc');
     });
 
-    it('tenc sets default_isProtected = 1', function () {
+    it('tenc sets default_isProtected = 0', function () {
       const stsd = findBox(result, [
         'moov',
         'trak',
@@ -147,10 +147,10 @@ describe('fakeEncryption', function () {
       const sinf = findBox(encv.subarray(78), ['sinf'])[0];
       const tenc = findBox(sinf, ['schi', 'tenc'])[0];
       // tenc layout: [0–3] version/flags, [4–5] reserved, [6] isProtected, [7] IV size, [8–23] KID
-      expect(tenc[6]).to.equal(1);
+      expect(tenc[6]).to.equal(0);
     });
 
-    it('tenc sets default_Per_Sample_IV_Size = 8', function () {
+    it('tenc sets default_Per_Sample_IV_Size = 0', function () {
       const stsd = findBox(result, [
         'moov',
         'trak',
@@ -162,7 +162,7 @@ describe('fakeEncryption', function () {
       const encv = findBox(stsd.subarray(8), ['encv'])[0];
       const sinf = findBox(encv.subarray(78), ['sinf'])[0];
       const tenc = findBox(sinf, ['schi', 'tenc'])[0];
-      expect(tenc[7]).to.equal(8);
+      expect(tenc[7]).to.equal(0);
     });
 
     it('tenc default_KID is all zeros (to be patched later)', function () {

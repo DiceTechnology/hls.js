@@ -198,8 +198,34 @@ export default class TransmuxerInterface {
     chunkMeta.transmuxing.start = self.performance.now();
     const { instanceNo, transmuxer } = this;
     const timeOffset = part ? part.start : frag.start;
+    console.log('$$$ TransmuxerInterface push', {
+      id: this.id,
+      sn: chunkMeta.sn,
+      part: chunkMeta.part,
+      level: chunkMeta.level,
+      timeOffset,
+      accurateTimeOffset,
+    });
     // TODO: push "clear-lead" decrypt data for unencrypted fragments in streams with encrypted ones
-    const decryptdata = frag.decryptdata;
+    // const decryptdata = frag.decryptdata;
+
+    // For clear-lead segments (frag.decryptdata is null), still pass the PlayReady
+    // key from the first encrypted fragment so generateInitSegment can call
+    // fakeEncryption and mark the SourceBuffer pipeline as encrypted from the start.
+    // PlayReady LevelKey.key is null so transmuxer.push won't attempt AES decryption
+    // on the clear segment data — only the init segment processing is affected.
+    let decryptdata = frag.decryptdata;
+    if (decryptdata == null) {
+      const levelDetails = this.hls.levels[frag.level]?.details;
+      const encryptedFrag = levelDetails?.encryptedFragments?.[0];
+      if (encryptedFrag?.levelkeys) {
+        decryptdata =
+          Object.values(encryptedFrag.levelkeys).find(
+            (k) => k?.isCommonEncryption,
+          ) ?? null;
+      }
+    }
+
     const lastFrag = this.frag;
 
     const discontinuity = !(lastFrag && frag.cc === lastFrag.cc);

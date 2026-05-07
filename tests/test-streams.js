@@ -47,6 +47,11 @@ function createTestStreamWithConfig(target, config) {
 }
 
 module.exports = {
+  ben: {
+    url: 'https://sample-videos-zyrkp2nj.s3-eu-west-1.amazonaws.com/big-buck-bunny-clear-to-encrypted/hls_fmp4_cenc_pw/master.m3u8',
+    description: 'Big Buck Bunny - clear to encrypted, fMP4, CENC, PlayReady',
+    abr: true,
+  },
   bbb: {
     url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
     description: 'Big Buck Bunny - adaptive qualities',

@@ -17,11 +17,20 @@ import {
   isCompatibleTrackChange,
   isManagedMediaSource,
 } from '../utils/mediasource-helper';
+import {
+  appendUint8Array,
+  bin2str,
+  findBox,
+  hasMoofData,
+  parseInitSegment,
+  patchTencIsProtected,
+  readUint32,
+} from '../utils/mp4-tools';
 import { stringify } from '../utils/safe-json-stringify';
 import type { FragmentTracker } from './fragment-tracker';
 import type { HlsConfig } from '../config';
 import type Hls from '../hls';
-import type { MediaFragment, Part } from '../loader/fragment';
+import type { Fragment, MediaFragment, Part } from '../loader/fragment';
 import type { LevelDetails } from '../loader/level-details';
 import type {
   AttachMediaSourceData,
@@ -120,8 +129,11 @@ export default class BufferController extends Logger implements ComponentAPI {
     [null, null],
   ];
 
+  private firstVideoInitSegmentAppended: boolean = false;
+
   constructor(hls: Hls, fragmentTracker: FragmentTracker) {
     super('buffer-controller', hls.logger);
+    this.debug('$$$ BufferController constructor');
     this.hls = hls;
     this.fragmentTracker = fragmentTracker;
     this.appendSource = isManagedMediaSource(
@@ -254,6 +266,7 @@ export default class BufferController extends Logger implements ComponentAPI {
     event: Events.MANIFEST_PARSED,
     data: ManifestParsedData,
   ) {
+    this.log('$$$ BufferController onManifestParsed', data);
     // in case of alt audio 2 BUFFER_CODECS events will be triggered, one per stream controller
     // sourcebuffers will be created all at once when the expected nb of tracks will be reached
     // in case alt audio is not used, only one BUFFER_CODEC event will be fired from main stream controller
@@ -1679,6 +1692,143 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
     }
   }
 
+  private preLoadFirstEncryptedInitSegmentData(
+    firstEncryptedInitSegment: Fragment,
+  ): Promise<Uint8Array> {
+    return new Promise((resolve, reject) => {
+      if (firstEncryptedInitSegment.data) {
+        resolve(firstEncryptedInitSegment.data as Uint8Array);
+      }
+      // remove the resource file from the base URL to get the true base URL for the init segment
+      // e.g. https://sample-videos-zyrkp2nj.s3-eu-west-1.amazon…ncrypted/hls_fmp4_cenc_pw/video_348000/index.m3u
+      const urlBase = firstEncryptedInitSegment.base.url.replace(
+        /\/[^/]*$/,
+        '/',
+      );
+      const initSegmentUrl = urlBase + firstEncryptedInitSegment.relurl;
+      fetch(initSegmentUrl)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch init segment data from ${initSegmentUrl}: ${response.statusText}`,
+            );
+          }
+          response
+            .arrayBuffer()
+            .then((arrayBuffer) => {
+              resolve(new Uint8Array(arrayBuffer));
+            })
+            .catch((error) => {
+              reject(error);
+            });
+        })
+        .catch((error) => {
+          reject(error);
+        });
+    });
+  }
+
+  private patchClearInitSegment(
+    clearInitSegmentData: Uint8Array,
+    firstEncryptedInitSegmentData: Uint8Array,
+  ): Uint8Array {
+    this.debug(
+      '$$$$ First clear init segment without PSSH boxes:',
+      parseInitSegment(clearInitSegmentData),
+      clearInitSegmentData,
+    );
+    this.debug(
+      '$$$$ First encrypted init segment with PSSH boxes:',
+      parseInitSegment(firstEncryptedInitSegmentData),
+      firstEncryptedInitSegmentData,
+    );
+
+    // PSSH boxes are children of moov — extract them by iterating moov's content
+    const psshBoxes: Uint8Array[] = [];
+    const moovContent = findBox(firstEncryptedInitSegmentData, ['moov'])[0];
+    if (moovContent) {
+      let offset = 0;
+      while (offset < moovContent.length) {
+        const size = readUint32(moovContent, offset);
+        if (size < 8) break;
+        const type = bin2str(moovContent.subarray(offset + 4, offset + 8));
+        if (type === 'pssh') {
+          psshBoxes.push(moovContent.subarray(offset, offset + size));
+        }
+        offset += size;
+      }
+    }
+
+    if (psshBoxes.length === 0) {
+      this.debug('$$$$ No PSSH boxes found in encrypted init segment');
+      return clearInitSegmentData;
+    }
+
+    // Rebuild the clear init segment, inserting PSSH boxes immediately before moov
+    const parts: Uint8Array[] = [];
+    let psshInserted = false;
+    let offset = 0;
+    while (offset < clearInitSegmentData.length) {
+      const size = readUint32(clearInitSegmentData, offset);
+      if (size < 8) break;
+      const type = bin2str(
+        clearInitSegmentData.subarray(offset + 4, offset + 8),
+      );
+      if (type === 'moov' && !psshInserted) {
+        psshBoxes.forEach((pssh) => parts.push(pssh));
+        psshInserted = true;
+      }
+      parts.push(clearInitSegmentData.subarray(offset, offset + size));
+      offset += size;
+    }
+
+    this.debug(
+      `$$$$ Copied ${psshBoxes.length} PSSH box(es) from encrypted init segment to clear init segment`,
+    );
+    const patchedInitSegment = parts.reduce(appendUint8Array);
+    this.debug(
+      '$$$$ Clear init segment with PSSH boxes patched in:',
+      parseInitSegment(patchedInitSegment),
+    );
+    return patchedInitSegment;
+  }
+
+  private patchClearInitSegmentForSL3000Compatability(
+    clearInitSegmentData: Uint8Array,
+  ): Promise<Uint8Array> {
+    return new Promise((resolve, reject) => {
+      // parse the data and extract the first encrypted init segment
+      const { details } = this;
+      if (!details) {
+        return reject(
+          new Error(
+            'Details must be available to find first encrypted init segment',
+          ),
+        );
+      }
+      const firstEncryptedInitSegment =
+        details.encryptedFragments?.[0].initSegment;
+      if (!firstEncryptedInitSegment) {
+        return reject(new Error('No encrypted init segment found in details'));
+      }
+      patchTencIsProtected(clearInitSegmentData);
+      this.preLoadFirstEncryptedInitSegmentData(firstEncryptedInitSegment)
+        .then((firstEncryptedInitSegmentData) => {
+          const patchedData = this.patchClearInitSegment(
+            clearInitSegmentData,
+            firstEncryptedInitSegmentData,
+          );
+          this.debug(
+            '$$$$ Finished patching init segment for SL3000 compatibility, appending to source buffer',
+          );
+          resolve(patchedData);
+        })
+        .catch((error) => {
+          reject(error);
+        });
+    });
+  }
+
   // This method must result in an updateend event; if append is not called, onSBUpdateEnd must be called manually
   private appendExecutor(
     data: Uint8Array<ArrayBuffer>,
@@ -1693,7 +1843,43 @@ transfer tracks: ${stringify(transferredTracks, (key, value) => (key === 'initSe
     }
     track.ending = false;
     track.ended = false;
-    sb.appendBuffer(data);
+    if (
+      !this.firstVideoInitSegmentAppended &&
+      type === 'video' &&
+      !hasMoofData(data)
+    ) {
+      this.firstVideoInitSegmentAppended = true;
+      const firstInitSegmentParsed = parseInitSegment(data);
+      if (firstInitSegmentParsed[1]?.stsd.encrypted) {
+        this.debug(
+          '$$$$ First video init segment is encrypted, no patching required for SL3000 compatibility',
+        );
+        sb.appendBuffer(data);
+        return;
+      }
+      this.debug(
+        '$$$$ First video init segment detected, patching for SL3000 compatibility',
+        firstInitSegmentParsed,
+      );
+
+      this.patchClearInitSegmentForSL3000Compatability(data)
+        .then((patchedData) => {
+          const currentSb = this.tracks[type]?.buffer;
+          if (!currentSb || this.mediaSource?.readyState !== 'open') {
+            this.onSBUpdateEnd('video');
+            return;
+          }
+          currentSb.appendBuffer(patchedData);
+        })
+        .catch((error) => {
+          this.warn(
+            `$$$$ Error patching init segment for SL3000 compatibility: ${error}`,
+          );
+          this.onSBUpdateEnd('video');
+        });
+    } else {
+      sb.appendBuffer(data);
+    }
   }
 
   private blockUntilOpen(callback: () => void) {

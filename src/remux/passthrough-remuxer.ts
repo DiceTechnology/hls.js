@@ -5,8 +5,8 @@ import {
 import { ElementaryStreamTypes } from '../loader/fragment';
 import { getCodecCompatibleName } from '../utils/codecs';
 import { type ILogger, Logger } from '../utils/logger';
-import { fakeEncryption, patchEncyptionData } from '../utils/mp4-tools';
-import { findBox, getSampleData, parseInitSegment, patchTencIsProtected } from '../utils/mp4-tools';
+import { patchEncyptionData } from '../utils/mp4-tools';
+import { getSampleData, parseInitSegment } from '../utils/mp4-tools';
 import type { HlsConfig } from '../config';
 import type { HlsEventEmitter } from '../events';
 import type { DecryptData } from '../loader/level-key';
@@ -29,7 +29,6 @@ import type { TimestampOffset } from '../utils/timescale-conversion';
 
 class PassThroughRemuxer extends Logger implements Remuxer {
   private emitInitSegment: boolean = false;
-  private encryptedInitPatched = false;
   private audioCodec?: string;
   private videoCodec?: string;
   private initData?: InitData;
@@ -74,13 +73,10 @@ class PassThroughRemuxer extends Logger implements Remuxer {
     videoCodec: string | undefined,
     decryptdata: DecryptData | null,
   ) {
-    console.log('$$$ PassThroughRemuxer - resetInitSegment called with audioCodec', audioCodec, 'videoCodec', videoCodec, 'decryptdata', JSON.stringify(decryptdata));
     this.audioCodec = audioCodec;
     this.videoCodec = videoCodec;
-    // if (decryptdata) decryptdata.keyFormat = "com.microsoft.playready.recommendation";
     this.generateInitSegment(initSegment, decryptdata);
     this.emitInitSegment = true;
-    this.encryptedInitPatched = false;
   }
 
   private generateInitSegment(
@@ -93,14 +89,12 @@ class PassThroughRemuxer extends Logger implements Remuxer {
       this.initData = undefined;
       return;
     }
+
+    const { audio, video } = (this.initData = parseInitSegment(initSegment));
+
     if (decryptdata) {
-      const { audio, video } = parseInitSegment(initSegment);
-      if (!audio?.encrypted && !video?.encrypted) {
-        initSegment = fakeEncryption(initSegment);
-      }
-      initSegment = patchEncyptionData(initSegment, decryptdata) ?? initSegment;
+      patchEncyptionData(initSegment, decryptdata);
     } else {
-      const { audio, video } = parseInitSegment(initSegment);
       const eitherTrack = audio || video;
       if (eitherTrack?.encrypted) {
         this.warn(
@@ -108,8 +102,6 @@ class PassThroughRemuxer extends Logger implements Remuxer {
         );
       }
     }
-
-    const { audio, video } = (this.initData = parseInitSegment(initSegment));
 
     // Get codec from initSegment
     if (audio) {
@@ -188,22 +180,6 @@ class PassThroughRemuxer extends Logger implements Remuxer {
     // The binary segment data is added to the videoTrack in the mp4demuxer. We don't check to see if the data is only
     // audio or video (or both); adding it to video was an arbitrary choice.
     const data = videoTrack.samples;
-
-    if (!this.encryptedInitPatched && findBox(data, ['moof', 'traf', 'senc']).length > 0) {
-      this.encryptedInitPatched = true;
-      if (this.initTracks) {
-        const seen = new Set<Uint8Array>();
-        // eslint-disable-next-line no-for-of-loops/no-for-of-loops
-        for (const track of Object.values(this.initTracks)) {
-          if (track?.initSegment && !seen.has(track.initSegment)) {
-            seen.add(track.initSegment);
-            patchTencIsProtected(track.initSegment as Uint8Array<ArrayBuffer>, true);
-          }
-        }
-        this.emitInitSegment = true;
-      }
-    }
-
 
     if (!data.length) {
       return result;

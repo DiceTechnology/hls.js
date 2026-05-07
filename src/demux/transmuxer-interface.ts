@@ -198,14 +198,7 @@ export default class TransmuxerInterface {
     chunkMeta.transmuxing.start = self.performance.now();
     const { instanceNo, transmuxer } = this;
     const timeOffset = part ? part.start : frag.start;
-    console.log('$$$ TransmuxerInterface push', {
-      id: this.id,
-      sn: chunkMeta.sn,
-      part: chunkMeta.part,
-      level: chunkMeta.level,
-      timeOffset,
-      accurateTimeOffset,
-    });
+
     // TODO: push "clear-lead" decrypt data for unencrypted fragments in streams with encrypted ones
     // const decryptdata = frag.decryptdata;
 

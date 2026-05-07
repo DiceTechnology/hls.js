@@ -576,11 +576,6 @@ export function patchEncyptionData(
   }
   const { keyId } = decryptdata;
   if (keyId && decryptdata.isCommonEncryption) {
-    // PlayReady key IDs are LE GUIDs; tenc default_KID must be a BE UUID.
-    const effectiveKeyId =
-      decryptdata.keyFormat === KeySystemFormats.PLAYREADY
-        ? leGuidToUuid(keyId)
-        : keyId;
     applyToTencBoxes(initSegment, (tenc, isAudio) => {
       // Look for default key id (keyID offset is always 8 within the tenc box):
       const tencKeyId = tenc.subarray(8, 24);
@@ -588,39 +583,22 @@ export function patchEncyptionData(
         logger.log(
           `[eme] Patching keyId in 'enc${
             isAudio ? 'a' : 'v'
-          }>sinf>>tenc' box: ${arrayToHex(tencKeyId)} -> ${arrayToHex(effectiveKeyId)}`,
+          }>sinf>>tenc' box: ${arrayToHex(tencKeyId)} -> ${arrayToHex(keyId)}`,
         );
-        tenc.set(effectiveKeyId, 8);
+        tenc.set(keyId, 8);
       }
     });
   }
   return initSegment;
 }
 
-// PlayReady key IDs are LE GUIDs (Data1/2/3 stored little-endian).
-// CENC tenc default_KID requires a standard big-endian UUID.
-// Swap the first three groups: bytes 0-3, bytes 4-5, bytes 6-7.
-function leGuidToUuid(
-  guid: Uint8Array<ArrayBuffer>,
-): Uint8Array<ArrayBuffer> {
-  const uuid = new Uint8Array(guid) as Uint8Array<ArrayBuffer>;
-  uuid[0] = guid[3];
-  uuid[1] = guid[2];
-  uuid[2] = guid[1];
-  uuid[3] = guid[0];
-  uuid[4] = guid[5];
-  uuid[5] = guid[4];
-  uuid[6] = guid[7];
-  uuid[7] = guid[6];
-  return uuid;
-}
 /**
  * Takes a clear init segment and returns a new one where every avc1 sample entry is wrapped
  * as encv (and mp4a as enca), each with a sinf box containing frma (original codec), schm (cenc),
  * and schi/tenc.
  */
 export function fakeEncryption(
-  clearInitSegment: Uint8Array<ArrayBuffer>
+  clearInitSegment: Uint8Array<ArrayBuffer>,
 ): Uint8Array<ArrayBuffer> {
   const base = clearInitSegment.byteOffset;
 
@@ -647,14 +625,22 @@ export function fakeEncryption(
       replacements.push({
         boxStart: avc1.byteOffset - base - 8,
         boxSize: avc1.length + 8,
-        newBox: buildEncBox(avc1, [0x65, 0x6e, 0x63, 0x76], [0x61, 0x76, 0x63, 0x31]), // encv, avc1
+        newBox: buildEncBox(
+          avc1,
+          [0x65, 0x6e, 0x63, 0x76],
+          [0x61, 0x76, 0x63, 0x31],
+        ), // encv, avc1
       });
     });
     findBox(sampleEntries, ['mp4a']).forEach((mp4a) => {
       replacements.push({
         boxStart: mp4a.byteOffset - base - 8,
         boxSize: mp4a.length + 8,
-        newBox: buildEncBox(mp4a, [0x65, 0x6e, 0x63, 0x61], [0x6d, 0x70, 0x34, 0x61]), // enca, mp4a
+        newBox: buildEncBox(
+          mp4a,
+          [0x65, 0x6e, 0x63, 0x61],
+          [0x6d, 0x70, 0x34, 0x61],
+        ), // enca, mp4a
       });
     });
   });
@@ -811,16 +797,12 @@ function applyToTencBoxes(
 
 export function patchTencIsProtected(
   initSegment: Uint8Array<ArrayBuffer>,
-  encrypted: boolean,
 ): void {
+  console.log('$$$$ patching tenc isProtected and IV size');
   applyToTencBoxes(initSegment, (tenc) => {
-    tenc[6] = encrypted ? 1 : 0; // default_isProtected
-    if (!encrypted || tenc[7] === 0) {
-      // Only update IV_size when disabling encryption, or when it was 0
-      // (IV_size=0 means this tenc was built by buildSinf via fakeEncryption;
-      //  real packager-built tenc will have 8 or 16 here and must be preserved)
-      tenc[7] = encrypted ? 8 : 0; // default_Per_Sample_IV_Size
-    }
+    tenc[6] = 1; // default_isProtected
+    // TODO - hardcoding 16 here but could be 8 - should get this from the real encrypted init segment
+    tenc[7] = 16; // default_Per_Sample_IV_Size
   });
 }
 

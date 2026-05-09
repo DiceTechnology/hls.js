@@ -1,6 +1,6 @@
 import { utf8ArrayToStr } from '@svta/common-media-library/utils/utf8ArrayToStr';
+import * as MP4Box from 'mp4box';
 import { arrayToHex } from './hex';
-import { KeySystemFormats } from './mediakeys-helper';
 import { ElementaryStreamTypes } from '../loader/fragment';
 import { logger } from '../utils/logger';
 import type { KeySystemIds } from './mediakeys-helper';
@@ -793,6 +793,39 @@ function applyToTencBoxes(
       });
     });
   });
+}
+
+export function dumpInitSegment(
+  message: string,
+  initSegment: Uint8Array<ArrayBuffer>,
+  // log: (...args: Array<string | object>) => void,
+  label: string,
+  parsed: boolean = false,
+): void {
+  if (parsed) {
+    const mp4boxfile = MP4Box.createFile();
+    const now = new Date();
+    const stamp = `${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}-${String(now.getMilliseconds()).padStart(3, '0')}`;
+    const dumpFile = `${label}-${stamp}.json`;
+    mp4boxfile.onReady = (info) => {
+      const json = JSON.stringify({ message, info }, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dump/${dumpFile}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      console.log(
+        `$$$$ '${label}' init segment dump saved to ~/Downloads/${dumpFile}`,
+      );
+    };
+    const buffer = initSegment.buffer as ArrayBuffer & { fileStart: number };
+    buffer.fileStart = 0;
+    mp4boxfile.appendBuffer(buffer);
+  } else {
+    console.log(`$$$$ ${message} (json):`, initSegment);
+  }
 }
 
 export function patchTencIsProtected(

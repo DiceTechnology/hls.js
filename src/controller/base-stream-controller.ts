@@ -40,6 +40,7 @@ import {
   updateFragPTSDTS,
 } from '../utils/level-helper';
 import { appendUint8Array } from '../utils/mp4-tools';
+import { patchClearInitSegment } from '../utils/playready-workaround';
 import TimeRanges from '../utils/time-ranges';
 import type { FragmentTracker } from './fragment-tracker';
 import type { HlsConfig } from '../config';
@@ -122,6 +123,7 @@ export default class BaseStreamController
   protected initPTS: TimestampOffset[] = [];
   protected buffering: boolean = true;
   protected loadingParts: boolean = false;
+  protected firstEncryptedInitSegmentData: Uint8Array | null = null;
   private loopSn?: string | number;
 
   constructor(
@@ -646,7 +648,6 @@ export default class BaseStreamController
         return data;
       })
       .then((data: FragLoadedData) => {
-        console.log('$$$ _loadInitSegment - loaded init segment, checking if decryption is needed', data);
         const { hls } = this;
         const { frag, payload } = data;
         const decryptData = frag.decryptdata;
@@ -690,11 +691,24 @@ export default class BaseStreamController
                 },
               });
               data.payload = decryptedData;
-              console.log('$$$ _loadInitSegment - calling this.completeInitSegmentLoad with decrypted data', data);
               return this.completeInitSegmentLoad(data);
             });
         }
-        console.log('$$$ _loadInitSegment - calling this.completeInitSegmentLoad with non-decrypted data', data);
+        console.log(
+          '$$$ _loadInitSegment - no decryption, payload byteLength:',
+          payload?.byteLength,
+          data,
+        );
+        if (this.firstEncryptedInitSegmentData) {
+          console.log(
+            '$$$ _loadInitSegment - TODO patching init segment with encryption data from first encrypted fragment',
+            this.firstEncryptedInitSegmentData?.byteLength,
+          );
+          data.frag.data = patchClearInitSegment(
+            new Uint8Array(data.payload),
+            this.firstEncryptedInitSegmentData,
+          );
+        }
         return this.completeInitSegmentLoad(data);
       })
       .catch((reason) => {

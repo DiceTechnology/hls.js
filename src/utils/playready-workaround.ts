@@ -12,11 +12,13 @@ import { KeySystemFormats } from './mediakeys-helper';
 import {
   appendUint8Array,
   bin2str,
+  dumpInitSegment,
   findBox,
   mp4Box,
   readUint32,
   writeUint32,
 } from './mp4-tools';
+import type { Fragment } from '../hls';
 import type { LevelDetails } from '../loader/level-details';
 
 /**
@@ -116,6 +118,9 @@ function createFakeSinfBox(
 }
 
 export function fakeEncryption(initSegment: Uint8Array) {
+  console.log(
+    '$$$$ Applying fake encryption to clear init segment to ensure encryption info is available for all init segments',
+  );
   const initSegmentCopy = new Uint8Array(initSegment);
 
   const moov = findBox(initSegmentCopy, ['moov'])[0];
@@ -271,4 +276,107 @@ export function fakeEncryption(initSegment: Uint8Array) {
   } else {
     return modifiedInitSegment;
   }
+}
+
+export function patchClearInitSegment(
+  clearInitSegmentData: Uint8Array,
+  firstEncryptedInitSegmentData: Uint8Array,
+): Uint8Array {
+  dumpInitSegment(
+    '$$$$ First clear init segment without PSSH boxes',
+    clearInitSegmentData,
+    'clear',
+  );
+  dumpInitSegment(
+    '$$$$ First encrypted init segment with PSSH boxes',
+    firstEncryptedInitSegmentData,
+    'encrypted',
+  );
+
+  // PSSH boxes are children of moov — extract them by iterating moov's content
+  const psshBoxes: Uint8Array[] = [];
+  const moovContent = findBox(firstEncryptedInitSegmentData, ['moov'])[0];
+  if (moovContent) {
+    let offset = 0;
+    while (offset < moovContent.length) {
+      const size = readUint32(moovContent, offset);
+      if (size < 8) break;
+      const type = bin2str(moovContent.subarray(offset + 4, offset + 8));
+      if (type === 'pssh') {
+        psshBoxes.push(moovContent.subarray(offset, offset + size));
+      }
+      offset += size;
+    }
+  }
+
+  if (psshBoxes.length === 0) {
+    this.debug('$$$$ No PSSH boxes found in encrypted init segment');
+    return clearInitSegmentData;
+  }
+
+  // Rebuild the clear init segment, inserting PSSH boxes inside moov (at end of moov content)
+  const parts: Uint8Array[] = [];
+  let offset = 0;
+  while (offset < clearInitSegmentData.length) {
+    const size = readUint32(clearInitSegmentData, offset);
+    if (size < 8) break;
+    const type = bin2str(clearInitSegmentData.subarray(offset + 4, offset + 8));
+    if (type === 'moov') {
+      // PSSH boxes must be inside moov (not at file level) for MediaFoundation/PlayReady to
+      // initialise the hardware-protected decode path before the first encrypted frame arrives
+      const psshData = psshBoxes.reduce(appendUint8Array);
+      const newMoovSize = size + psshData.length;
+      const newMoov = new Uint8Array(newMoovSize);
+      newMoov.set(clearInitSegmentData.subarray(offset, offset + size), 0);
+      writeUint32(newMoov, 0, newMoovSize);
+      newMoov.set(psshData, size);
+      parts.push(newMoov);
+    } else {
+      parts.push(clearInitSegmentData.subarray(offset, offset + size));
+    }
+    offset += size;
+  }
+  console.log(
+    `$$$$ Copied ${psshBoxes.length} PSSH box(es) from encrypted init segment to clear init segment`,
+  );
+  const patchedClearInitSegment = parts.reduce(appendUint8Array);
+  dumpInitSegment(
+    '$$$$ Clear init segment with PSSH boxes patched in',
+    patchedClearInitSegment,
+    'patched',
+  );
+  return patchedClearInitSegment;
+}
+
+export function preLoadFirstEncryptedInitSegmentData(
+  firstEncryptedInitSegment: Fragment,
+): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    if (firstEncryptedInitSegment.data) {
+      resolve(firstEncryptedInitSegment.data as Uint8Array);
+    }
+    // remove the resource file from the base URL to get the true base URL for the init segment
+    // e.g. https://sample-videos-zyrkp2nj.s3-eu-west-1.amazon…ncrypted/hls_fmp4_cenc_pw/video_348000/index.m3u
+    const urlBase = firstEncryptedInitSegment.base.url.replace(/\/[^/]*$/, '/');
+    const initSegmentUrl = urlBase + firstEncryptedInitSegment.relurl;
+    fetch(initSegmentUrl)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch init segment data from ${initSegmentUrl}: ${response.statusText}`,
+          );
+        }
+        response
+          .arrayBuffer()
+          .then((arrayBuffer) => {
+            resolve(new Uint8Array(arrayBuffer));
+          })
+          .catch((error) => {
+            reject(error);
+          });
+      })
+      .catch((error) => {
+        reject(error);
+      });
+  });
 }

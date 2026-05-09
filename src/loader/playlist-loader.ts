@@ -557,9 +557,9 @@ class PlaylistLoader implements NetworkComponentAPI {
       this.variableList,
     );
 
-    if (hls.config.requiresEncryptionInfoInAllInitSegments) {
-      applyPlayReadyWorkaroundToLevelDetails(levelDetails);
-    }
+    // if (hls.config.requiresEncryptionInfoInAllInitSegments) {
+    //   applyPlayReadyWorkaroundToLevelDetails(levelDetails);
+    // }
 
     // We have done our first request (Manifest-type) and receive
     // not a master playlist but a chunk-list (track/level)

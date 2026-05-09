@@ -135,5 +135,8 @@
     "typescript": "5.8.3",
     "url-toolkit": "2.2.5",
     "wrangler": "4.26.1"
+  },
+  "dependencies": {
+    "mp4box": "^2.3.0"
   }
 }

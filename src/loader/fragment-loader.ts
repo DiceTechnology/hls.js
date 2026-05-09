@@ -104,13 +104,13 @@ export default class FragmentLoader {
             frag.decryptdata.iv = new Uint8Array(payload.slice(0, 16));
             payload = payload.slice(16);
           }
-          if (
-            this.config.requiresEncryptionInfoInAllInitSegments &&
-            frag.sn === 'initSegment'
-          ) {
-            payload = fakeEncryption(new Uint8Array(payload))
-              .buffer as ArrayBuffer;
-          }
+          // if (
+          //   this.config.requiresEncryptionInfoInAllInitSegments &&
+          //   frag.sn === 'initSegment'
+          // ) {
+          //   payload = fakeEncryption(new Uint8Array(payload))
+          //     .buffer as ArrayBuffer;
+          // }
           resolve({
             frag,
             part: null,

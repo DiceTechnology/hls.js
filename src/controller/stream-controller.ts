@@ -15,6 +15,7 @@ import {
   addEventListener,
   removeEventListener,
 } from '../utils/event-listener-helper';
+import { preLoadFirstEncryptedInitSegmentData } from '../utils/playready-workaround';
 import { useAlternateAudio } from '../utils/rendition-helper';
 import type { FragmentTracker } from './fragment-tracker';
 import type Hls from '../hls';
@@ -389,7 +390,32 @@ export default class StreamController
       fragState === FragmentState.PARTIAL
     ) {
       if (!isMediaFragment(frag)) {
-        this._loadInitSegment(frag, level);
+        if (!this.firstEncryptedInitSegmentData) {
+          // Pre-fetch first encrypted init segment to obtain its decryption data
+          const details = this.getLevelDetails();
+          const firstEncryptedInit =
+            details?.encryptedFragments?.[0].initSegment;
+          if (firstEncryptedInit) {
+            preLoadFirstEncryptedInitSegmentData(firstEncryptedInit)
+              .then((data) => {
+                this.firstEncryptedInitSegmentData = data;
+                this._loadInitSegment(frag, level);
+              })
+              .catch((error) => {
+                console.log(
+                  '$$$$ Failed to pre-load first encrypted init segment data:',
+                  error,
+                );
+                // TODO handle this error case, e.g. by loading the init segment without patching it
+                // with encryption data, which might lead to decryption failure but at least would
+                // allow playback to start in some cases (e.g. if the init segment contains clear
+                // key data or if the browser is able to handle the encrypted init segment without
+                // patching)
+              });
+          }
+        } else {
+          this._loadInitSegment(frag, level);
+        }
       } else if (this.bitrateTest) {
         this.log(
           `Fragment ${frag.sn} of level ${frag.level} is being downloaded to test bitrate and will not be buffered`,

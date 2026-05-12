@@ -592,169 +592,6 @@ export function patchEncyptionData(
   return initSegment;
 }
 
-/**
- * Takes a clear init segment and returns a new one where every avc1 sample entry is wrapped
- * as encv (and mp4a as enca), each with a sinf box containing frma (original codec), schm (cenc),
- * and schi/tenc.
- */
-export function fakeEncryption(
-  clearInitSegment: Uint8Array<ArrayBuffer>,
-): Uint8Array<ArrayBuffer> {
-  const base = clearInitSegment.byteOffset;
-
-  // Collect codec boxes that need to be replaced (avc1→encv, mp4a→enca).
-  // Each entry records the original box position (including its 8-byte header) and the
-  // full replacement box so we can stitch a new, correctly-sized buffer.
-  const replacements: Array<{
-    boxStart: number; // offset of original box header in clearInitSegment
-    boxSize: number; // total original box size (header + content)
-    newBox: Uint8Array;
-  }> = [];
-
-  findBox(clearInitSegment, ['moov', 'trak']).forEach((trak) => {
-    const stsd = findBox(trak, [
-      'mdia',
-      'minf',
-      'stbl',
-      'stsd',
-    ])[0] as BoxDataOrUndefined;
-    if (!stsd) return;
-    const sampleEntries = stsd.subarray(8);
-
-    findBox(sampleEntries, ['avc1']).forEach((avc1) => {
-      replacements.push({
-        boxStart: avc1.byteOffset - base - 8,
-        boxSize: avc1.length + 8,
-        newBox: buildEncBox(
-          avc1,
-          [0x65, 0x6e, 0x63, 0x76],
-          [0x61, 0x76, 0x63, 0x31],
-        ), // encv, avc1
-      });
-    });
-    findBox(sampleEntries, ['mp4a']).forEach((mp4a) => {
-      replacements.push({
-        boxStart: mp4a.byteOffset - base - 8,
-        boxSize: mp4a.length + 8,
-        newBox: buildEncBox(
-          mp4a,
-          [0x65, 0x6e, 0x63, 0x61],
-          [0x6d, 0x70, 0x34, 0x61],
-        ), // enca, mp4a
-      });
-    });
-  });
-
-  // Already encrypted (or no recognised codec entries) — return unchanged.
-  if (replacements.length === 0) return clearInitSegment;
-  replacements.sort((a, b) => a.boxStart - b.boxStart);
-
-  // Build a new buffer by stitching the original with each codec box replaced.
-  const totalExtra = replacements.reduce(
-    (sum, r) => sum + r.newBox.length - r.boxSize,
-    0,
-  );
-  const result = new Uint8Array(
-    clearInitSegment.length + totalExtra,
-  ) as Uint8Array<ArrayBuffer>;
-
-  let srcPos = 0;
-  let dstPos = 0;
-  replacements.forEach((r) => {
-    result.set(clearInitSegment.subarray(srcPos, r.boxStart), dstPos);
-    dstPos += r.boxStart - srcPos;
-    result.set(r.newBox, dstPos);
-    dstPos += r.newBox.length;
-    srcPos = r.boxStart + r.boxSize;
-  });
-  result.set(clearInitSegment.subarray(srcPos), dstPos);
-
-  // Patch the size fields of every ancestor box (moov → trak → mdia → minf → stbl → stsd).
-  // Ancestor boxes always begin before their descendants, so a box at original position P
-  // sits at P + (sum of deltas from replacements that came before P) in the new buffer.
-  [
-    ['moov'],
-    ['moov', 'trak'],
-    ['moov', 'trak', 'mdia'],
-    ['moov', 'trak', 'mdia', 'minf'],
-    ['moov', 'trak', 'mdia', 'minf', 'stbl'],
-    ['moov', 'trak', 'mdia', 'minf', 'stbl', 'stsd'],
-  ].forEach((path) => {
-    findBox(clearInitSegment, path).forEach((box) => {
-      const origStart = box.byteOffset - base - 8;
-      const origEnd = origStart + box.length + 8;
-      let delta = 0;
-      let priorShift = 0;
-      replacements.forEach((r) => {
-        if (r.boxStart < origStart) priorShift += r.newBox.length - r.boxSize;
-        if (r.boxStart >= origStart && r.boxStart + r.boxSize <= origEnd)
-          delta += r.newBox.length - r.boxSize;
-      });
-      if (delta !== 0) {
-        const newStart = origStart + priorShift;
-        writeUint32(result, newStart, readUint32(result, newStart) + delta);
-      }
-    });
-  });
-
-  return result;
-}
-
-// Builds a full enc box (encv or enca) wrapping the original codec content plus a sinf.
-// codecContent is the box content returned by findBox (no header).
-// encFourCC / origFourCC are 4-byte arrays of char codes.
-function buildEncBox(
-  codecContent: Uint8Array,
-  encFourCC: number[],
-  origFourCC: number[],
-): Uint8Array {
-  const sinf = buildSinf(origFourCC);
-  const box = new Uint8Array(8 + codecContent.length + sinf.length);
-  writeUint32(box, 0, box.length);
-  box.set(encFourCC, 4);
-  box.set(codecContent, 8);
-  box.set(sinf, 8 + codecContent.length);
-  return box;
-}
-
-// Builds an 80-byte sinf box: frma(12) + schm(20) + schi(40).
-function buildSinf(origFourCC: number[]): Uint8Array {
-  // frma: [size=12][frma][original_format]
-  const frma = new Uint8Array(12);
-  writeUint32(frma, 0, 12);
-  frma.set([0x66, 0x72, 0x6d, 0x61], 4); // 'frma'
-  frma.set(origFourCC, 8);
-
-  // schm: [size=20][schm][version/flags=0][scheme_type=cenc][scheme_version=0x00010000]
-  const schm = new Uint8Array(20);
-  writeUint32(schm, 0, 20);
-  schm.set([0x73, 0x63, 0x68, 0x6d], 4); // 'schm'
-  schm.set([0x63, 0x65, 0x6e, 0x63], 12); // 'cenc' at content bytes 4–7
-  schm.set([0x00, 0x01, 0x00, 0x00], 16); // scheme_version = 1.0
-
-  // tenc: [size=32][tenc][v/f=0][reserved=0,0][isProtected=0][IV_size=0][KID=16×0]
-  const tenc = new Uint8Array(32);
-  writeUint32(tenc, 0, 32);
-  tenc.set([0x74, 0x65, 0x6e, 0x63], 4); // 'tenc'
-  tenc[14] = 0; // default_isProtected
-  tenc[15] = 0; // default_Per_Sample_IV_Size
-
-  // schi: [size=40][schi][tenc(32)]
-  const schi = new Uint8Array(40);
-  writeUint32(schi, 0, 40);
-  schi.set([0x73, 0x63, 0x68, 0x69], 4); // 'schi'
-  schi.set(tenc, 8);
-
-  // sinf: [size=80][sinf][frma(12)][schm(20)][schi(40)]
-  const sinf = new Uint8Array(80);
-  writeUint32(sinf, 0, 80);
-  sinf.set([0x73, 0x69, 0x6e, 0x66], 4); // 'sinf'
-  sinf.set(frma, 8);
-  sinf.set(schm, 20);
-  sinf.set(schi, 40);
-  return sinf;
-}
-
 export function parseKeyIdsFromTenc(
   initSegment: Uint8Array<ArrayBuffer>,
 ): Uint8Array<ArrayBuffer>[] {
@@ -795,36 +632,46 @@ function applyToTencBoxes(
   });
 }
 
-export function dumpInitSegment(
+export function dumpSegment(
   message: string,
-  initSegment: Uint8Array<ArrayBuffer>,
+  segment: Uint8Array<ArrayBuffer>,
   // log: (...args: Array<string | object>) => void,
   label: string,
   parsed: boolean = false,
 ): void {
-  if (parsed) {
-    const mp4boxfile = MP4Box.createFile();
+  console.log('$$$$ dumping segment for', message);
+  function downloadBlob(blob: Blob, extension: string) {
     const now = new Date();
     const stamp = `${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}-${String(now.getMilliseconds()).padStart(3, '0')}`;
-    const dumpFile = `${label}-${stamp}.json`;
+    const safeLabel = label.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    const dumpFile = `${safeLabel}-${stamp}.${extension}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dump/${dumpFile}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    console.log(
+      `$$$$ '${label}' segment dump saved to ~/Downloads/${dumpFile}`,
+    );
+  }
+
+  if (parsed) {
+    const mp4boxfile = MP4Box.createFile();
     mp4boxfile.onReady = (info) => {
       const json = JSON.stringify({ message, info }, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `dump/${dumpFile}`;
-      a.click();
-      URL.revokeObjectURL(url);
-      console.log(
-        `$$$$ '${label}' init segment dump saved to ~/Downloads/${dumpFile}`,
-      );
+      downloadBlob(blob, 'json');
     };
-    const buffer = initSegment.buffer as ArrayBuffer & { fileStart: number };
+    const buffer = segment.buffer as ArrayBuffer & { fileStart: number };
     buffer.fileStart = 0;
     mp4boxfile.appendBuffer(buffer);
   } else {
-    console.log(`$$$$ ${message} (json):`, initSegment);
+    console.log(`$$$$ ${message} (json):`, segment);
+    const hex = Array.from(segment, (b) =>
+      b.toString(16).padStart(2, '0'),
+    ).join(' ');
+    downloadBlob(new Blob([hex], { type: 'text/plain' }), 'txt');
   }
 }
 
@@ -834,7 +681,6 @@ export function patchTencIsProtected(
   console.log('$$$$ patching tenc isProtected and IV size');
   applyToTencBoxes(initSegment, (tenc) => {
     tenc[6] = 1; // default_isProtected
-    // TODO - hardcoding 16 here but could be 8 - should get this from the real encrypted init segment
     tenc[7] = 16; // default_Per_Sample_IV_Size
   });
 }

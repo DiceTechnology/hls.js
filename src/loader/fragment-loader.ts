@@ -1,6 +1,5 @@
 import { ErrorDetails, ErrorTypes } from '../errors';
 import { getLoaderConfigWithoutReties } from '../utils/error-helper';
-import { fakeEncryption } from '../utils/playready-workaround';
 import type { BaseSegment, Fragment, Part } from './fragment';
 import type { HlsConfig } from '../config';
 import type {
@@ -104,13 +103,6 @@ export default class FragmentLoader {
             frag.decryptdata.iv = new Uint8Array(payload.slice(0, 16));
             payload = payload.slice(16);
           }
-          // if (
-          //   this.config.requiresEncryptionInfoInAllInitSegments &&
-          //   frag.sn === 'initSegment'
-          // ) {
-          //   payload = fakeEncryption(new Uint8Array(payload))
-          //     .buffer as ArrayBuffer;
-          // }
           resolve({
             frag,
             part: null,

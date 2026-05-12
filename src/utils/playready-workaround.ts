@@ -1,24 +1,14 @@
-/**
- * PlayReady DRM Workarounds
- *
- * This module provides workarounds for PlayReady DRM compatibility issues,
- * particularly with Xbox One and Microsoft Edge browsers. It includes functions
- * to patch level details and fake encryption in MP4 init segments to ensure
- * smooth playback of DRM-protected content.
- */
-
 import { logger } from './logger';
 import { KeySystemFormats } from './mediakeys-helper';
 import {
-  appendUint8Array,
   bin2str,
-  dumpInitSegment,
+  dumpSegment,
   findBox,
-  mp4Box,
+  readUint16,
   readUint32,
   writeUint32,
 } from './mp4-tools';
-import type { Fragment } from '../hls';
+import type { Fragment, MediaFragment } from '../hls';
 import type { LevelDetails } from '../loader/level-details';
 
 /**
@@ -46,235 +36,335 @@ export function applyPlayReadyWorkaroundToLevelDetails(
   }
 }
 
-/**
- * Creates a fake sinf (protection scheme information) box for MP4.
- *
- * This function generates a sinf box that mimics encryption information,
- * which is required for PlayReady DRM compatibility on certain platforms.
- *
- * @param encType - The encryption type bytes (e.g., 'encv' or 'enca')
- * @param fourCC - The four-character code of the original sample entry
- * @param entry - The original sample entry data
- * @returns A Uint8Array containing the modified entry with the fake sinf box
- */
-function createFakeSinfBox(
-  encType: Uint8Array,
-  fourCC: string,
-  entry: Uint8Array,
-) {
-  const entryCopy = new Uint8Array(entry);
-  entryCopy.set(encType, 4);
-
-  const sinf = mp4Box(
-    [0x73, 0x69, 0x6e, 0x66], // 'sinf'
-    mp4Box(
-      [0x66, 0x72, 0x6d, 0x61], // 'frma'
-      new Uint8Array(fourCC.split('').map((c) => c.charCodeAt(0))),
-    ),
-    mp4Box(
-      [0x73, 0x63, 0x68, 0x6d], // 'schm'
-      new Uint8Array([
-        0x00, 0x00, 0x00, 0x00, 0x63, 0x65, 0x6e, 0x63, 0x00, 0x01, 0x00, 0x00,
-      ]),
-    ),
-    mp4Box(
-      [0x73, 0x63, 0x68, 0x69], // 'schi'
-      mp4Box(
-        [0x74, 0x65, 0x6e, 0x63], // 'tenc'
-        new Uint8Array([
-          0x00, // version 0
-          0x00,
-          0x00,
-          0x00, // flags
-          0x00,
-          0x00, // Reserved fields
-          0x01, // Default protected: true
-          0x08, // Default per-sample IV size: 8
-          0x00, // Default KID (Key ID) - 16 bytes of zeros
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-        ]),
-      ),
-    ),
+export function patchClearMediaSegment(
+  clearSegmentData: Uint8Array,
+  _firstEncryptedSegmentData: Uint8Array,
+): Uint8Array {
+  dumpSegment(
+    '$$$$ Clear media segment before CENC sample-group patch',
+    clearSegmentData,
+    'clear media',
   );
 
-  // Append the sinf box to the modified entry and update the size
-  const entryWithSinf = appendUint8Array(entryCopy, sinf);
-  writeUint32(entryWithSinf, 0, entryWithSinf.length);
-  return entryWithSinf;
+  const moofArr = findBox(clearSegmentData, ['moof']);
+  if (!moofArr.length) {
+    logger.warn('[playready-workaround] patchClearMediaSegment: no moof found');
+    return clearSegmentData;
+  }
+  const moof = moofArr[0];
+
+  const trafArr = findBox(moof, ['traf']);
+  if (!trafArr.length) {
+    logger.warn('[playready-workaround] patchClearMediaSegment: no traf found');
+    return clearSegmentData;
+  }
+  const traf = trafArr[0];
+
+  const trunArr = findBox(traf, ['trun']);
+  if (!trunArr.length) {
+    logger.warn('[playready-workaround] patchClearMediaSegment: no trun found');
+    return clearSegmentData;
+  }
+  const trun = trunArr[0];
+  // trun content layout: version(1) + flags(3) + sample_count(4) + [data_offset(4)] + ...
+  const sampleCount = readUint32(trun, 4);
+  // data_offset_present is flag bit 0x000001; flags are big-endian in bytes 1-3,
+  // so trun[3] is the least-significant byte
+  const dataOffsetPresent = trun[3] & 0x01;
+
+  // Find existing sbgp boxes: preserve roll, abort if seig already present
+  const sbgpArr = findBox(traf, ['sbgp']);
+  let insertionOffset = -1;
+  for (let i = 0; i < sbgpArr.length; i++) {
+    const sbgp = sbgpArr[i];
+    // sbgp content: version/flags(4) + grouping_type(4) + ...
+    const groupingType = bin2str(sbgp.subarray(4, 8));
+    if (groupingType === 'seig') {
+      logger.debug(
+        '[playready-workaround] patchClearMediaSegment: seig already present, skipping',
+      );
+      return clearSegmentData;
+    }
+    if (groupingType === 'roll') {
+      // Insert after the end of this roll sbgp box (byteOffset is absolute in clearData)
+      insertionOffset = sbgp.byteOffset + sbgp.length;
+    }
+  }
+
+  // Fallback: insert after trun if no roll sbgp found
+  if (insertionOffset === -1) {
+    insertionOffset = trun.byteOffset + trun.length;
+  }
+
+  const INSERTED_BYTES = 72; // 44 (sgpd) + 28 (sbgp)
+
+  // Build sgpd(seig) — 44 bytes
+  // Layout: size(4) + "sgpd"(4) + version=1/flags=0(4) + grouping_type="seig"(4) +
+  //         default_length=20(4) + entry_count=1(4) + entry(20)
+  // Entry: isProtected=0(3) + perSampleIvSize=0(1) + zero-KID(16) — all zero
+  const sgpdSeig = new Uint8Array(44);
+  writeUint32(sgpdSeig, 0, 44);
+  sgpdSeig[4] = 0x73;
+  sgpdSeig[5] = 0x67;
+  sgpdSeig[6] = 0x70;
+  sgpdSeig[7] = 0x64; // "sgpd"
+  sgpdSeig[8] = 0x01; // version=1
+  sgpdSeig[12] = 0x73;
+  sgpdSeig[13] = 0x65;
+  sgpdSeig[14] = 0x69;
+  sgpdSeig[15] = 0x67; // "seig"
+  writeUint32(sgpdSeig, 16, 20); // default_length
+  writeUint32(sgpdSeig, 20, 1); // entry_count
+  // bytes 24-43: entry (all zero — isProtected=0, perSampleIvSize=0, KID=0×16)
+
+  // Build sbgp(seig) — 28 bytes
+  // Layout: size(4) + "sbgp"(4) + version=0/flags=0(4) + grouping_type="seig"(4) +
+  //         entry_count=1(4) + sample_count(4) + group_description_index=1(4)
+  const sbgpSeig = new Uint8Array(28);
+  writeUint32(sbgpSeig, 0, 28);
+  sbgpSeig[4] = 0x73;
+  sbgpSeig[5] = 0x62;
+  sbgpSeig[6] = 0x67;
+  sbgpSeig[7] = 0x70; // "sbgp"
+  // bytes 8-11: version=0, flags=0 (already zero)
+  sbgpSeig[12] = 0x73;
+  sbgpSeig[13] = 0x65;
+  sbgpSeig[14] = 0x69;
+  sbgpSeig[15] = 0x67; // "seig"
+  writeUint32(sbgpSeig, 16, 1); // entry_count
+  writeUint32(sbgpSeig, 20, sampleCount); // sample_count
+  writeUint32(sbgpSeig, 24, 1); // group_description_index
+
+  // Assemble patched segment
+  const newData = new Uint8Array(clearSegmentData.length + INSERTED_BYTES);
+  newData.set(clearSegmentData.subarray(0, insertionOffset), 0);
+  newData.set(sgpdSeig, insertionOffset);
+  newData.set(sbgpSeig, insertionOffset + 44);
+  newData.set(
+    clearSegmentData.subarray(insertionOffset),
+    insertionOffset + INSERTED_BYTES,
+  );
+
+  // Update moof.size and traf.size — both box headers are before insertionOffset
+  // so their positions in newData are unchanged
+  const moofSizeOffset = moof.byteOffset - 8;
+  writeUint32(
+    newData,
+    moofSizeOffset,
+    readUint32(newData, moofSizeOffset) + INSERTED_BYTES,
+  );
+  const trafSizeOffset = traf.byteOffset - 8;
+  writeUint32(
+    newData,
+    trafSizeOffset,
+    readUint32(newData, trafSizeOffset) + INSERTED_BYTES,
+  );
+
+  // If trun.data_offset is present, bump it by the number of bytes inserted before mdat
+  if (dataOffsetPresent) {
+    const trunDataOffsetPos = trun.byteOffset + 8; // after version(1)+flags(3)+sample_count(4)
+    writeUint32(
+      newData,
+      trunDataOffsetPos,
+      readUint32(newData, trunDataOffsetPos) + INSERTED_BYTES,
+    );
+  }
+
+  // Update sidx referenced_size if a sidx box precedes moof
+  updateSidxReferencedSize(
+    clearSegmentData,
+    newData,
+    INSERTED_BYTES,
+    moofSizeOffset,
+  );
+
+  validatePatchedSegment(
+    clearSegmentData,
+    newData,
+    INSERTED_BYTES,
+    moofSizeOffset,
+    trafSizeOffset,
+    dataOffsetPresent ? trun.byteOffset + 8 : -1,
+  );
+
+  dumpSegment(
+    '$$$$ Clear media segment after CENC sample-group patch',
+    newData,
+    'patched media',
+  );
+  return newData;
 }
 
-export function fakeEncryption(initSegment: Uint8Array) {
-  console.log(
-    '$$$$ Applying fake encryption to clear init segment to ensure encryption info is available for all init segments',
-  );
-  const initSegmentCopy = new Uint8Array(initSegment);
+/**
+ * sidx content layout (bytes within the box content, i.e. after the 8-byte header):
+ *   0      : version (1 byte)
+ *   1-3    : flags (3 bytes)
+ *   4-7    : reference_ID
+ *   8-11   : timescale
+ *   v0: 12-15 earliest_presentation_time, 16-19 first_offset
+ *   v1: 12-19 earliest_presentation_time, 20-27 first_offset
+ *   v0: 20-21 reserved, 22-23 reference_count
+ *   v1: 28-29 reserved, 30-31 reference_count
+ *   v0: entries start at 24  (each entry = 12 bytes)
+ *   v1: entries start at 32
+ *
+ * Each 12-byte reference entry:
+ *   [0-3]  reference_type(1 bit) | referenced_size(31 bits)
+ *   [4-7]  subsegment_duration
+ *   [8-11] SAP flags
+ */
+function updateSidxReferencedSize(
+  clearData: Uint8Array,
+  newData: Uint8Array,
+  insertedBytes: number,
+  moofOffset: number,
+): void {
+  const sidxArr = findBox(clearData, ['sidx']);
+  if (!sidxArr.length) return;
 
-  const moov = findBox(initSegmentCopy, ['moov'])[0];
-  if (!moov) {
-    return initSegment;
-  }
+  const sidx = sidxArr[0];
 
-  // Only patch single trak files (no audio+video)
-  const traks = findBox(moov, ['trak']);
-  if (!traks || traks.length > 1) {
-    return initSegment;
-  }
-
-  const trak = traks[0];
-  const mdia = findBox(trak, ['mdia'])[0];
-  const minf = findBox(mdia, ['minf'])[0];
-  const stbl = findBox(minf, ['stbl'])[0];
-  const stsdBox = findBox(stbl, ['stsd'])[0];
-  if (!mdia || !minf || !stbl || !stsdBox) {
-    return initSegment;
-  }
-
-  // Patch stsd box
-  const entryCount = readUint32(stsdBox, 4);
-  let entryOffset = 8;
-  const newEntries: Uint8Array[] = [];
-  for (let i = 0; i < entryCount; i++) {
-    const size = readUint32(stsdBox, entryOffset);
-    const fourCC = bin2str(stsdBox.subarray(entryOffset + 4, entryOffset + 8));
-    const entry = stsdBox.subarray(entryOffset, entryOffset + size);
-    let boxType: Uint8Array | undefined = undefined;
-    switch (fourCC) {
-      case 'avc1':
-      case 'avc2':
-      case 'avc3':
-      case 'avc4':
-        boxType = new Uint8Array([0x65, 0x6e, 0x63, 0x76]); // 'encv'
-        break;
-      case 'mp4a':
-        boxType = new Uint8Array([0x65, 0x6e, 0x63, 0x61]); // 'enca'
-        break;
-      default:
-        break;
-    }
-
-    if (boxType) {
-      const encEntry = createFakeSinfBox(boxType, fourCC, entry);
-      // For Xbox One & Edge, we cut and insert at the start of the source box.
-      // For other platforms, we cut and insert at the end of the source box. It's
-      // not clear why this is necessary on Xbox One, but it seems to be evidence
-      // of another bug in the firmware implementation of MediaSource & EME.
-      // TODO: needs more tests
-      if (navigator.userAgent.match(/Edge?\//)) {
-        newEntries.push(encEntry);
-        newEntries.push(entry);
-      } else {
-        newEntries.push(entry);
-        newEntries.push(encEntry);
-      }
-    } else {
-      newEntries.push(entry);
-    }
-
-    entryOffset += size;
-  }
-
-  // Rebuild stsd box with new entries
-  const stsdHeader = stsdBox.subarray(0, 8);
-  writeUint32(stsdHeader, 4, newEntries.length);
-  const newStsd = mp4Box([0x73, 0x74, 0x73, 0x64], stsdHeader, ...newEntries);
-  const stsdOffset = stsdBox.byteOffset - trak.byteOffset - 8;
-
-  // Update sizes of parent boxes
-  writeUint32(
-    trak,
-    stbl.byteOffset - trak.byteOffset - 8,
-    stbl.length - stsdBox.length + newStsd.length,
-  );
-  writeUint32(
-    trak,
-    minf.byteOffset - trak.byteOffset - 8,
-    minf.length - stsdBox.length + newStsd.length,
-  );
-  writeUint32(
-    trak,
-    mdia.byteOffset - trak.byteOffset - 8,
-    mdia.length - stsdBox.length + newStsd.length,
-  );
-
-  // Rebuild trak with patched stsd box
-  let patchedTrak = trak;
-  if (stsdOffset > 0) {
-    patchedTrak = new Uint8Array(
-      trak.length - stsdBox.length + newStsd.length - 8,
+  // Reject a sidx that starts at or after moof — it cannot reference the patched subsegment
+  if (sidx.byteOffset - 8 >= moofOffset) {
+    logger.warn(
+      '[playready-workaround] sidx appears after moof, skipping update',
     );
-    patchedTrak.set(trak.subarray(0, stsdOffset), 0);
-    patchedTrak.set(newStsd, stsdOffset);
-    patchedTrak.set(
-      trak.subarray(stsdOffset + stsdBox.length + 8),
-      stsdOffset + newStsd.length,
+    return;
+  }
+
+  const version = sidx[0];
+  const refCountOffset = version === 0 ? 22 : 30;
+  const entriesStart = version === 0 ? 24 : 32;
+
+  const referenceCount = readUint16(sidx, refCountOffset);
+
+  if (referenceCount === 0) {
+    logger.warn(
+      '[playready-workaround] sidx has 0 references, skipping update',
+    );
+    return;
+  }
+
+  if (referenceCount > 1) {
+    // Cannot determine which reference covers the patched subsegment without
+    // tracking byte ranges, so fail loudly rather than updating blindly.
+    logger.warn(
+      `[playready-workaround] sidx has ${referenceCount} references; cannot identify affected reference — sidx not updated`,
+    );
+    return;
+  }
+
+  // Single reference: it must cover the moof+mdat that follows sidx, so update it.
+  // sidx.byteOffset is absolute within clearData; sidx is before insertionOffset so
+  // its position is unchanged in newData.
+  const refFieldOffset = sidx.byteOffset + entriesStart;
+  const ref = readUint32(newData, refFieldOffset);
+  const referenceType = ref & 0x80000000;
+  const referencedSize = ref & 0x7fffffff;
+
+  const newReferencedSize = referencedSize + insertedBytes;
+  if (newReferencedSize > 0x7fffffff) {
+    logger.warn(
+      '[playready-workaround] sidx referenced_size would overflow 31 bits, skipping update',
+    );
+    return;
+  }
+
+  writeUint32(newData, refFieldOffset, referenceType | newReferencedSize);
+}
+
+function validatePatchedSegment(
+  original: Uint8Array,
+  patched: Uint8Array,
+  insertedBytes: number,
+  moofOffset: number,
+  trafOffset: number,
+  trunDataOffsetPos: number,
+): void {
+  const tag = '[playready-workaround] validation:';
+
+  if (patched.length !== original.length + insertedBytes) {
+    logger.warn(
+      `${tag} file size: expected ${original.length + insertedBytes}, got ${patched.length}`,
     );
   }
 
-  // Rebuild moov with patched trak
-  let moovRest = moov;
-  const trakOffset = trak.byteOffset - moov.byteOffset;
-  writeUint32(moovRest, trakOffset - 8, patchedTrak.length + 8);
-
-  if (trakOffset > 0) {
-    const before = moovRest.subarray(0, trakOffset);
-    const after = moovRest.subarray(trakOffset + trak.length);
-    const newMoov = new Uint8Array(
-      before.length + patchedTrak.length + after.length,
+  const origMoofSize = readUint32(original, moofOffset);
+  const patchedMoofSize = readUint32(patched, moofOffset);
+  if (patchedMoofSize !== origMoofSize + insertedBytes) {
+    logger.warn(
+      `${tag} moof.size: expected ${origMoofSize + insertedBytes}, got ${patchedMoofSize}`,
     );
-    newMoov.set(before, 0);
-    newMoov.set(patchedTrak, before.length);
-    newMoov.set(after, before.length + patchedTrak.length);
-    moovRest = newMoov;
   }
 
-  const patchedMoov = new Uint8Array(8 + moovRest.length);
-  patchedMoov.set(
-    initSegment.subarray(moov.byteOffset - 8, moov.byteOffset),
-    0,
-  );
-  patchedMoov.set(moovRest, 8);
-  writeUint32(patchedMoov, 0, moovRest.length + 8);
+  const origTrafSize = readUint32(original, trafOffset);
+  const patchedTrafSize = readUint32(patched, trafOffset);
+  if (patchedTrafSize !== origTrafSize + insertedBytes) {
+    logger.warn(
+      `${tag} traf.size: expected ${origTrafSize + insertedBytes}, got ${patchedTrafSize}`,
+    );
+  }
 
-  // Now reconstruct the full MP4, replacing only the moov atom
-  const out: Uint8Array[] = [];
-  let offset = 0;
-  while (offset < initSegment.length) {
-    const size = readUint32(initSegment, offset);
-    const type = bin2str(initSegment.subarray(offset + 4, offset + 8));
-    if (type === 'moov') {
-      out.push(patchedMoov);
-    } else {
-      out.push(initSegment.subarray(offset, offset + size));
+  if (trunDataOffsetPos !== -1) {
+    const origDataOffset = readUint32(original, trunDataOffsetPos);
+    const patchedDataOffset = readUint32(patched, trunDataOffsetPos);
+    if (patchedDataOffset !== origDataOffset + insertedBytes) {
+      logger.warn(
+        `${tag} trun.data_offset: expected ${origDataOffset + insertedBytes}, got ${patchedDataOffset}`,
+      );
     }
-    offset += size;
   }
 
-  const modifiedInitSegment = appendUint8Array(out[0], out[1]);
-  logger.debug(
-    'Use fakeEncryption for clear to drm transition with PlayReady DRM',
-  );
-  // Edge Windows needs the unmodified init segment to be appended after the
-  // patched one, otherwise video element throws following error:
-  // CHUNK_DEMUXER_ERROR_APPEND_FAILED: Sample encryption info is not
-  // available.
-  if (navigator.userAgent.match(/Edge?\//)) {
-    return appendUint8Array(modifiedInitSegment, initSegment);
+  // Verify mdat payload is byte-for-byte unchanged
+  const origMdatArr = findBox(original, ['mdat']);
+  const patchedMdatArr = findBox(patched, ['mdat']);
+  if (!origMdatArr.length || !patchedMdatArr.length) {
+    logger.warn(`${tag} mdat not found`);
   } else {
-    return modifiedInitSegment;
+    const origMdat = origMdatArr[0];
+    const patchedMdat = patchedMdatArr[0];
+
+    if (patchedMdat.byteOffset !== origMdat.byteOffset + insertedBytes) {
+      logger.warn(
+        `${tag} mdat offset: expected ${origMdat.byteOffset + insertedBytes}, got ${patchedMdat.byteOffset}`,
+      );
+    }
+
+    if (origMdat.length !== patchedMdat.length) {
+      logger.warn(
+        `${tag} mdat length changed: ${origMdat.length} → ${patchedMdat.length}`,
+      );
+    } else {
+      // Spot-check first and last 8 bytes to avoid O(n) scan on large payloads
+      const checkOffsets = [0, origMdat.length - 8];
+      for (let ci = 0; ci < checkOffsets.length; ci++) {
+        const checkOffset = checkOffsets[ci];
+        if (checkOffset < 0) continue;
+        for (let b = 0; b < 8; b++) {
+          if (origMdat[checkOffset + b] !== patchedMdat[checkOffset + b]) {
+            logger.warn(
+              `${tag} mdat payload differs at offset ${checkOffset + b}`,
+            );
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Verify sidx referenced_size bit-31 (reference_type) is unchanged
+  const origSidxArr = findBox(original, ['sidx']);
+  const patchedSidxArr = findBox(patched, ['sidx']);
+  if (origSidxArr.length && patchedSidxArr.length) {
+    const origSidx = origSidxArr[0];
+    const patchedSidx = patchedSidxArr[0];
+    const version = origSidx[0];
+    const entriesStart = version === 0 ? 24 : 32;
+    const origRefType = readUint32(origSidx, entriesStart) & 0x80000000;
+    const patchedRefType = readUint32(patchedSidx, entriesStart) & 0x80000000;
+    if (origRefType !== patchedRefType) {
+      logger.warn(`${tag} sidx reference_type bit changed`);
+    }
   }
 }
 
@@ -282,70 +372,254 @@ export function patchClearInitSegment(
   clearInitSegmentData: Uint8Array,
   firstEncryptedInitSegmentData: Uint8Array,
 ): Uint8Array {
-  dumpInitSegment(
+  dumpSegment(
     '$$$$ First clear init segment without PSSH boxes',
     clearInitSegmentData,
-    'clear',
+    'clear init',
   );
-  dumpInitSegment(
+  dumpSegment(
     '$$$$ First encrypted init segment with PSSH boxes',
     firstEncryptedInitSegmentData,
-    'encrypted',
+    'encrypted init',
   );
 
-  // PSSH boxes are children of moov — extract them by iterating moov's content
+  // Collect PSSH boxes from the encrypted init segment.
   const psshBoxes: Uint8Array[] = [];
-  const moovContent = findBox(firstEncryptedInitSegmentData, ['moov'])[0];
-  if (moovContent) {
+  const encryptedMoovContent = findBox(firstEncryptedInitSegmentData, [
+    'moov',
+  ])[0];
+  if (encryptedMoovContent) {
     let offset = 0;
-    while (offset < moovContent.length) {
-      const size = readUint32(moovContent, offset);
+    while (offset < encryptedMoovContent.length) {
+      const size = readUint32(encryptedMoovContent, offset);
       if (size < 8) break;
-      const type = bin2str(moovContent.subarray(offset + 4, offset + 8));
+      const type = bin2str(
+        encryptedMoovContent.subarray(offset + 4, offset + 8),
+      );
       if (type === 'pssh') {
-        psshBoxes.push(moovContent.subarray(offset, offset + size));
+        psshBoxes.push(encryptedMoovContent.subarray(offset, offset + size));
       }
       offset += size;
     }
   }
-
   if (psshBoxes.length === 0) {
-    this.debug('$$$$ No PSSH boxes found in encrypted init segment');
+    logger.debug('No PSSH boxes found in encrypted init segment');
+    dumpSegment(
+      '$$$$ Clear init segment unchanged (no PSSH found)',
+      clearInitSegmentData,
+      'patched init',
+    );
     return clearInitSegmentData;
   }
 
-  // Rebuild the clear init segment, inserting PSSH boxes inside moov (at end of moov content)
-  const parts: Uint8Array[] = [];
-  let offset = 0;
-  while (offset < clearInitSegmentData.length) {
-    const size = readUint32(clearInitSegmentData, offset);
-    if (size < 8) break;
-    const type = bin2str(clearInitSegmentData.subarray(offset + 4, offset + 8));
-    if (type === 'moov') {
-      // PSSH boxes must be inside moov (not at file level) for MediaFoundation/PlayReady to
-      // initialise the hardware-protected decode path before the first encrypted frame arrives
-      const psshData = psshBoxes.reduce(appendUint8Array);
-      const newMoovSize = size + psshData.length;
-      const newMoov = new Uint8Array(newMoovSize);
-      newMoov.set(clearInitSegmentData.subarray(offset, offset + size), 0);
-      writeUint32(newMoov, 0, newMoovSize);
-      newMoov.set(psshData, size);
-      parts.push(newMoov);
-    } else {
-      parts.push(clearInitSegmentData.subarray(offset, offset + size));
-    }
-    offset += size;
+  // Extract the sinf box from the encrypted init's encv sample entry.
+  // We inject this sinf into the clear init's avc1 entry (renamed to encv)
+  // so Chrome sets up an encrypted decode pipeline. We preserve the clear
+  // init's own avcC/codec params — replacing the whole stsd would break
+  // every level other than the one the encrypted init was packaged for.
+  const encryptedStsdContent = findBox(firstEncryptedInitSegmentData, [
+    'moov',
+    'trak',
+    'mdia',
+    'minf',
+    'stbl',
+    'stsd',
+  ])[0];
+  if (!encryptedStsdContent) {
+    logger.warn(
+      '[playready-workaround] Could not find encrypted stsd, falling back to PSSH-only patch',
+    );
+    return patchPsshOnly(clearInitSegmentData, psshBoxes);
   }
-  console.log(
-    `$$$$ Copied ${psshBoxes.length} PSSH box(es) from encrypted init segment to clear init segment`,
+  const encryptedSampleEntries = encryptedStsdContent.subarray(8);
+  const encv = findBox(encryptedSampleEntries, ['encv'])[0];
+  if (!encv) {
+    logger.warn(
+      '[playready-workaround] Could not find encv, falling back to PSSH-only patch',
+    );
+    return patchPsshOnly(clearInitSegmentData, psshBoxes);
+  }
+  // Skip the 78-byte VisualSampleEntry fixed fields to reach child boxes.
+  const encvChildren = encv.subarray(78);
+  const sinfContent = findBox(encvChildren, ['sinf'])[0];
+  if (!sinfContent) {
+    logger.warn(
+      '[playready-workaround] Could not find sinf, falling back to PSSH-only patch',
+    );
+    return patchPsshOnly(clearInitSegmentData, psshBoxes);
+  }
+  // Copy sinf (with its 8-byte header) so we can mutate default_isProtected.
+  // Layout: sinf(8) + frma(12) + schm(20) + schi(8) + tenc(8) + tenc_content(24).
+  // default_isProtected is at byte 62 of the full box (offset 54 within tenc content).
+  const sinfBox = firstEncryptedInitSegmentData.slice(
+    sinfContent.byteOffset - 8,
+    sinfContent.byteOffset + sinfContent.length,
   );
-  const patchedClearInitSegment = parts.reduce(appendUint8Array);
-  dumpInitSegment(
-    '$$$$ Clear init segment with PSSH boxes patched in',
-    patchedClearInitSegment,
-    'patched',
+  sinfBox[62] = 1; // default_IsProtected = 1
+  sinfBox[63] = 16; // default_Per_Sample_IV_Size = 16
+
+  // Find the clear stsd and ancestor boxes.
+  const clearStsdContent = findBox(clearInitSegmentData, [
+    'moov',
+    'trak',
+    'mdia',
+    'minf',
+    'stbl',
+    'stsd',
+  ])[0];
+  const clearMoov = findBox(clearInitSegmentData, ['moov'])[0];
+  const clearTrak = findBox(clearInitSegmentData, ['moov', 'trak'])[0];
+  const clearMdia = findBox(clearInitSegmentData, ['moov', 'trak', 'mdia'])[0];
+  const clearMinf = findBox(clearInitSegmentData, [
+    'moov',
+    'trak',
+    'mdia',
+    'minf',
+  ])[0];
+  const clearStbl = findBox(clearInitSegmentData, [
+    'moov',
+    'trak',
+    'mdia',
+    'minf',
+    'stbl',
+  ])[0];
+
+  if (
+    !clearStsdContent ||
+    !clearMoov ||
+    !clearTrak ||
+    !clearMdia ||
+    !clearMinf ||
+    !clearStbl
+  ) {
+    logger.warn(
+      '[playready-workaround] Could not find clear stsd or parent boxes, falling back to PSSH-only patch',
+    );
+    return patchPsshOnly(clearInitSegmentData, psshBoxes);
+  }
+
+  const sinfSize = sinfBox.length;
+  const psshTotal = psshBoxes.reduce((acc, b) => acc + b.length, 0);
+  // clearStsdBoxEnd = first byte after the stsd box = also end of the sole
+  // sample entry, so appending sinfBox here extends that entry.
+  const clearStsdBoxEnd = clearStsdContent.byteOffset + clearStsdContent.length;
+  const moovBoxOffset = clearMoov.byteOffset - 8;
+  const moovBoxEnd = moovBoxOffset + clearMoov.length + 8;
+
+  const result = new Uint8Array(
+    clearInitSegmentData.length + sinfSize + psshTotal,
   );
-  return patchedClearInitSegment;
+
+  // 1. Copy everything up to and including the stsd box content unchanged.
+  result.set(clearInitSegmentData.subarray(0, clearStsdBoxEnd), 0);
+
+  // 2. Insert sinf immediately after stsd content (inside the sample entry —
+  //    sizes updated below make the parser treat it as a child of encv).
+  result.set(sinfBox, clearStsdBoxEnd);
+
+  // 3. Copy from after stsd to end of moov.
+  result.set(
+    clearInitSegmentData.subarray(clearStsdBoxEnd, moovBoxEnd),
+    clearStsdBoxEnd + sinfSize,
+  );
+
+  // 4. Append PSSH boxes at the end of moov.
+  let psshDest = clearStsdBoxEnd + sinfSize + (moovBoxEnd - clearStsdBoxEnd);
+  for (let i = 0; i < psshBoxes.length; i++) {
+    result.set(psshBoxes[i], psshDest);
+    psshDest += psshBoxes[i].length;
+  }
+
+  // 5. Copy any bytes after moov.
+  result.set(clearInitSegmentData.subarray(moovBoxEnd), psshDest);
+
+  // 6. Rename the avc1 sample entry type to encv.
+  //    stsd box header = 8, FullBox version+flags+count = 8, entry size = 4,
+  //    so entry type sits at clearStsdBoxStart + 20.
+  const clearStsdBoxStart = clearStsdContent.byteOffset - 8;
+  const entryTypeOffset = clearStsdBoxStart + 20;
+  result[entryTypeOffset] = 0x65; // 'e'
+  result[entryTypeOffset + 1] = 0x6e; // 'n'
+  result[entryTypeOffset + 2] = 0x63; // 'c'
+  result[entryTypeOffset + 3] = 0x76; // 'v'
+
+  // 7. Update box sizes.
+  // Sample entry (avc1→encv) grows by sinfSize.
+  const entryOffset = clearStsdBoxStart + 16;
+  writeUint32(result, entryOffset, readUint32(result, entryOffset) + sinfSize);
+  // Ancestors all start before the insertion point so their offsets are
+  // unchanged from clearInitSegmentData.
+  writeUint32(
+    result,
+    clearStsdBoxStart,
+    clearStsdContent.length + 8 + sinfSize,
+  );
+  writeUint32(
+    result,
+    clearStbl.byteOffset - 8,
+    clearStbl.length + 8 + sinfSize,
+  );
+  writeUint32(
+    result,
+    clearMinf.byteOffset - 8,
+    clearMinf.length + 8 + sinfSize,
+  );
+  writeUint32(
+    result,
+    clearMdia.byteOffset - 8,
+    clearMdia.length + 8 + sinfSize,
+  );
+  writeUint32(
+    result,
+    clearTrak.byteOffset - 8,
+    clearTrak.length + 8 + sinfSize,
+  );
+  writeUint32(
+    result,
+    moovBoxOffset,
+    clearMoov.length + 8 + sinfSize + psshTotal,
+  );
+
+  dumpSegment(
+    '$$$$ Clear init segment: avc1→encv+sinf (isProtected=0) + PSSH injected',
+    result,
+    'patched init',
+  );
+  return result;
+}
+
+function patchPsshOnly(
+  clearInitSegmentData: Uint8Array,
+  psshBoxes: Uint8Array[],
+): Uint8Array {
+  const moovInClear = findBox(clearInitSegmentData, ['moov'])[0];
+  if (!moovInClear) {
+    return clearInitSegmentData;
+  }
+  const moovBoxOffset = moovInClear.byteOffset - 8;
+  const moovBoxSize = moovInClear.length + 8;
+  const psshTotal = psshBoxes.reduce((acc, b) => acc + b.length, 0);
+  const newMoovBoxSize = moovBoxSize + psshTotal;
+  const result = new Uint8Array(clearInitSegmentData.length + psshTotal);
+  result.set(clearInitSegmentData.subarray(0, moovBoxOffset), 0);
+  writeUint32(result, moovBoxOffset, newMoovBoxSize);
+  result.set(
+    clearInitSegmentData.subarray(
+      moovBoxOffset + 4,
+      moovBoxOffset + moovBoxSize,
+    ),
+    moovBoxOffset + 4,
+  );
+  let psshDest = moovBoxOffset + moovBoxSize;
+  for (let i = 0; i < psshBoxes.length; i++) {
+    result.set(psshBoxes[i], psshDest);
+    psshDest += psshBoxes[i].length;
+  }
+  result.set(
+    clearInitSegmentData.subarray(moovBoxOffset + moovBoxSize),
+    moovBoxOffset + newMoovBoxSize,
+  );
+  return result;
 }
 
 export function preLoadFirstEncryptedInitSegmentData(

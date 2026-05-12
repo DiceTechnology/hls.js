@@ -1,3 +1,4 @@
+import { M } from 'mp4box/dist/log-DO1-_KSL';
 import BaseStreamController, { State } from './base-stream-controller';
 import { findFragmentByPTS } from './fragment-finders';
 import { FragmentState } from './fragment-tracker';
@@ -15,7 +16,10 @@ import {
   addEventListener,
   removeEventListener,
 } from '../utils/event-listener-helper';
-import { preLoadFirstEncryptedInitSegmentData } from '../utils/playready-workaround';
+import {
+  patchClearMediaSegment,
+  preLoadFirstEncryptedInitSegmentData,
+} from '../utils/playready-workaround';
 import { useAlternateAudio } from '../utils/rendition-helper';
 import type { FragmentTracker } from './fragment-tracker';
 import type Hls from '../hls';
@@ -236,6 +240,10 @@ export default class StreamController
   }
 
   private doTickIdle() {
+    if (this.waitingForInitSegmentAppend) {
+      return;
+    }
+
     const { hls, levelLastLoaded, levels, media } = this;
 
     // if start level not parsed yet OR
@@ -396,6 +404,7 @@ export default class StreamController
           const firstEncryptedInit =
             details?.encryptedFragments?.[0].initSegment;
           if (firstEncryptedInit) {
+            this.waitingForInitSegmentAppend = true;
             preLoadFirstEncryptedInitSegmentData(firstEncryptedInit)
               .then((data) => {
                 this.firstEncryptedInitSegmentData = data;
@@ -406,11 +415,8 @@ export default class StreamController
                   '$$$$ Failed to pre-load first encrypted init segment data:',
                   error,
                 );
-                // TODO handle this error case, e.g. by loading the init segment without patching it
-                // with encryption data, which might lead to decryption failure but at least would
-                // allow playback to start in some cases (e.g. if the init segment contains clear
-                // key data or if the browser is able to handle the encrypted init segment without
-                // patching)
+                this.waitingForInitSegmentAppend = false;
+                this._loadInitSegment(frag, level);
               });
           }
         } else {
@@ -821,7 +827,18 @@ export default class StreamController
     }
   }
 
+  protected patchMediaSegment(payload: ArrayBuffer): ArrayBuffer {
+    if (!this.firstEncryptedInitSegmentData) {
+      return payload;
+    }
+    return patchClearMediaSegment(
+      new Uint8Array(payload),
+      this.firstEncryptedInitSegmentData,
+    ).buffer as ArrayBuffer;
+  }
+
   protected _handleFragmentLoadProgress(data: FragLoadedData) {
+    console.log('$$$$ onFragLoadProgress', data);
     const frag = data.frag as MediaFragment;
     const { part, payload } = data;
     const { levels } = this;

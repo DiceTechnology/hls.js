@@ -1,4 +1,5 @@
 import { M } from 'mp4box/dist/log-DO1-_KSL';
+import { resolveConfig } from 'prettier';
 import BaseStreamController, { State } from './base-stream-controller';
 import { findFragmentByPTS } from './fragment-finders';
 import { FragmentState } from './fragment-tracker';
@@ -16,9 +17,11 @@ import {
   addEventListener,
   removeEventListener,
 } from '../utils/event-listener-helper';
+import { dumpSegment } from '../utils/mp4-tools';
 import {
   patchClearMediaSegment,
   preLoadFirstEncryptedInitSegmentData,
+  preLoadFirstEncryptedMediaSegmentData,
 } from '../utils/playready-workaround';
 import { useAlternateAudio } from '../utils/rendition-helper';
 import type { FragmentTracker } from './fragment-tracker';
@@ -402,17 +405,21 @@ export default class StreamController
           // Pre-fetch first encrypted init segment to obtain its decryption data
           const details = this.getLevelDetails();
           const firstEncryptedInit =
-            details?.encryptedFragments?.[0].initSegment;
+            details?.encryptedFragments?.[0]?.initSegment;
           if (firstEncryptedInit) {
             this.waitingForInitSegmentAppend = true;
-            preLoadFirstEncryptedInitSegmentData(firstEncryptedInit)
-              .then((data) => {
-                this.firstEncryptedInitSegmentData = data;
+            Promise.all([
+              preLoadFirstEncryptedInitSegmentData(firstEncryptedInit),
+              preLoadFirstEncryptedMediaSegmentData(),
+            ])
+              .then(([initData, mediaData]) => {
+                this.firstEncryptedInitSegmentData = initData;
+                this.firstEncryptedMediaSegmentData = mediaData;
                 this._loadInitSegment(frag, level);
               })
               .catch((error) => {
                 console.log(
-                  '$$$$ Failed to pre-load first encrypted init segment data:',
+                  '$$$$ Failed to pre-load first encrypted segment data:',
                   error,
                 );
                 this.waitingForInitSegmentAppend = false;
@@ -828,12 +835,14 @@ export default class StreamController
   }
 
   protected patchMediaSegment(payload: ArrayBuffer): ArrayBuffer {
-    if (!this.firstEncryptedInitSegmentData) {
+    if (!this.firstEncryptedMediaSegmentData) {
       return payload;
     }
     return patchClearMediaSegment(
       new Uint8Array(payload),
-      this.firstEncryptedInitSegmentData,
+      this.firstEncryptedMediaSegmentData,
+      'moof-relative',
+      'mirror-encrypted-senc-shape',
     ).buffer as ArrayBuffer;
   }
 

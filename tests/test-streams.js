@@ -47,7 +47,17 @@ function createTestStreamWithConfig(target, config) {
 }
 
 module.exports = {
-  ben: {
+  benlocal: {
+    url: 'http://127.0.0.1:8081/master.m3u8',
+    description: 'My locally packaged HLS stream',
+    abr: false,
+  },
+  encrypted: {
+    url: 'https://sample-videos-zyrkp2nj.s3-eu-west-1.amazonaws.com/drm-test-vod/master.m3u8',
+    description: 'drm-test-vod',
+    abr: true,
+  },
+  clearToEncrypted: {
     url: 'https://sample-videos-zyrkp2nj.s3-eu-west-1.amazonaws.com/big-buck-bunny-clear-to-encrypted/hls_fmp4_cenc_pw/master.m3u8',
     description: 'Big Buck Bunny - clear to encrypted, fMP4, CENC, PlayReady',
     abr: true,

@@ -124,6 +124,7 @@ export default class BaseStreamController
   protected buffering: boolean = true;
   protected loadingParts: boolean = false;
   protected firstEncryptedInitSegmentData: Uint8Array | null = null;
+  protected firstEncryptedMediaSegmentData: Uint8Array | null = null;
   protected waitingForInitSegmentAppend: boolean = false;
   private loopSn?: string | number;
 
@@ -540,15 +541,17 @@ export default class BaseStreamController
         }
 
         if ('payload' in data) {
-          dumpSegment(
-            'Dumping media segment',
-            new Uint8Array(data.payload),
-            'media segment',
-          );
+          // dumpSegment(
+          //   'media segment',
+          //   new Uint8Array(data.payload),
+          //   'media segment',
+          // );
           this.log(
             `Loaded ${frag.type} sn: ${frag.sn} of ${this.playlistLabel()} ${frag.level}`,
           );
-          data.payload = this.patchMediaSegment(data.payload);
+          if (hls.config.requiresEncryptionInfoInAllInitSegments) {
+            data.payload = this.patchMediaSegment(data.payload);
+          }
           this.hls.trigger(Events.FRAG_LOADED, data);
         }
 
@@ -715,7 +718,8 @@ export default class BaseStreamController
         );
         if (
           this.firstEncryptedInitSegmentData &&
-          !this.encryptedInitSegmentPatched
+          !this.encryptedInitSegmentPatched &&
+          hls.config.requiresEncryptionInfoInAllInitSegments
         ) {
           this.encryptedInitSegmentPatched = true;
           console.log(

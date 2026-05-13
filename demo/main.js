@@ -41,7 +41,7 @@ const hlsjsDefaults = {
     videoRobustness: '3000',
     audioRobustness: '3000',
   },
-  requiresEncryptionInfoInAllInitSegments: true,
+  requiresEncryptionInfoInAllInitSegments: false,
   licenseXhrSetup: async function (xhr) {
     const res = await fetch(
       'https://shield-api.imggaming.com/admin/v1/ovp/dice/client/dce.sandbox/action/sign_test_content_token',

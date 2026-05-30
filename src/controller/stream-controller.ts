@@ -1,3 +1,5 @@
+import { M } from 'mp4box/dist/log-DO1-_KSL';
+import { resolveConfig } from 'prettier';
 import BaseStreamController, { State } from './base-stream-controller';
 import { findFragmentByPTS } from './fragment-finders';
 import { FragmentState } from './fragment-tracker';
@@ -15,6 +17,12 @@ import {
   addEventListener,
   removeEventListener,
 } from '../utils/event-listener-helper';
+import { dumpSegment } from '../utils/mp4-tools';
+import {
+  patchClearMediaSegment,
+  preLoadFirstEncryptedInitSegmentData,
+  preLoadFirstEncryptedMediaSegmentData,
+} from '../utils/playready-workaround';
 import { useAlternateAudio } from '../utils/rendition-helper';
 import type { FragmentTracker } from './fragment-tracker';
 import type Hls from '../hls';
@@ -235,6 +243,10 @@ export default class StreamController
   }
 
   private doTickIdle() {
+    if (this.waitingForInitSegmentAppend) {
+      return;
+    }
+
     const { hls, levelLastLoaded, levels, media } = this;
 
     // if start level not parsed yet OR
@@ -389,7 +401,34 @@ export default class StreamController
       fragState === FragmentState.PARTIAL
     ) {
       if (!isMediaFragment(frag)) {
-        this._loadInitSegment(frag, level);
+        if (!this.firstEncryptedInitSegmentData) {
+          // Pre-fetch first encrypted init segment to obtain its decryption data
+          const details = this.getLevelDetails();
+          const firstEncryptedInit =
+            details?.encryptedFragments?.[0]?.initSegment;
+          if (firstEncryptedInit) {
+            this.waitingForInitSegmentAppend = true;
+            Promise.all([
+              preLoadFirstEncryptedInitSegmentData(firstEncryptedInit),
+              preLoadFirstEncryptedMediaSegmentData(),
+            ])
+              .then(([initData, mediaData]) => {
+                this.firstEncryptedInitSegmentData = initData;
+                this.firstEncryptedMediaSegmentData = mediaData;
+                this._loadInitSegment(frag, level);
+              })
+              .catch((error) => {
+                console.log(
+                  '$$$$ Failed to pre-load first encrypted segment data:',
+                  error,
+                );
+                this.waitingForInitSegmentAppend = false;
+                this._loadInitSegment(frag, level);
+              });
+          }
+        } else {
+          this._loadInitSegment(frag, level);
+        }
       } else if (this.bitrateTest) {
         this.log(
           `Fragment ${frag.sn} of level ${frag.level} is being downloaded to test bitrate and will not be buffered`,
@@ -795,7 +834,20 @@ export default class StreamController
     }
   }
 
+  protected patchMediaSegment(payload: ArrayBuffer): ArrayBuffer {
+    if (!this.firstEncryptedMediaSegmentData) {
+      return payload;
+    }
+    return patchClearMediaSegment(
+      new Uint8Array(payload),
+      this.firstEncryptedMediaSegmentData,
+      'moof-relative',
+      'mirror-encrypted-senc-shape',
+    ).buffer as ArrayBuffer;
+  }
+
   protected _handleFragmentLoadProgress(data: FragLoadedData) {
+    console.log('$$$$ onFragLoadProgress', data);
     const frag = data.frag as MediaFragment;
     const { part, payload } = data;
     const { levels } = this;

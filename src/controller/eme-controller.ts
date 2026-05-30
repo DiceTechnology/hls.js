@@ -98,6 +98,7 @@ class EMEController extends Logger implements ComponentAPI {
     ? [EMEController.CDMCleanupPromise]
     : [];
   private bannedKeyIds: { [keyId: string]: MediaKeyStatus | undefined } = {};
+  private pendingCencInitData: ArrayBuffer | null = null;
 
   constructor(hls: Hls) {
     super('eme', hls.logger);
@@ -138,7 +139,12 @@ class EMEController extends Logger implements ComponentAPI {
 
   private getLicenseServerUrl(keySystem: KeySystems): string | undefined {
     const { drmSystems, widevineLicenseUrl } = this.config;
-    const keySystemConfiguration = drmSystems?.[keySystem];
+    // const keySystemConfiguration = drmSystems?.[keySystem];
+    const keySystemConfiguration =
+      drmSystems?.[keySystem] ??
+      (keySystem === KeySystems.PLAYREADY_RECOMMENDATION
+        ? drmSystems?.[KeySystems.PLAYREADY]
+        : undefined);
 
     if (keySystemConfiguration) {
       return keySystemConfiguration.licenseUrl;
@@ -162,8 +168,12 @@ class EMEController extends Logger implements ComponentAPI {
 
   private getServerCertificateUrl(keySystem: KeySystems): string | void {
     const { drmSystems } = this.config;
-    const keySystemConfiguration = drmSystems?.[keySystem];
-
+    // const keySystemConfiguration = drmSystems?.[keySystem];
+    const keySystemConfiguration =
+      drmSystems?.[keySystem] ??
+      (keySystem === KeySystems.PLAYREADY_RECOMMENDATION
+        ? drmSystems?.[KeySystems.PLAYREADY]
+        : undefined);
     if (keySystemConfiguration) {
       return keySystemConfiguration.serverCertificateUrl;
     } else {
@@ -439,7 +449,17 @@ class EMEController extends Logger implements ComponentAPI {
       .filter(
         (value) => !!value && keySystemsInConfig.indexOf(value) !== -1,
       ) as any as KeySystems[];
-
+    // Chrome on Windows registers PlayReady as the recommendation variant.
+    // When the standard key system is in the attempt list, add the recommendation
+    // variant as an immediate fallback so attemptKeySystemAccess tries it next.
+    if (keySystemsToAttempt.indexOf(KeySystems.PLAYREADY) !== -1) {
+      const idx = keySystemsToAttempt.indexOf(KeySystems.PLAYREADY);
+      keySystemsToAttempt.splice(
+        idx + 1,
+        0,
+        KeySystems.PLAYREADY_RECOMMENDATION,
+      );
+    }
     return this.selectKeySystem(keySystemsToAttempt);
   }
 
@@ -570,7 +590,7 @@ class EMEController extends Logger implements ComponentAPI {
       const keySystemsToAttempt = keySystem
         ? [keySystem]
         : getKeySystemsForConfig(this.config);
-      return this.attemptKeySystemAccess(keySystemsToAttempt);
+      return this.getKeySystemSelectionPromise(keySystemsToAttempt);
     }
     return mediaKeySessionContext;
   }
@@ -591,6 +611,19 @@ class EMEController extends Logger implements ComponentAPI {
         `Missing key-system license configuration options ${stringify({
           drmSystems: this.config.drmSystems,
         })}`,
+      );
+    }
+    // Add recommendation variant as fallback if base PlayReady is in the list
+    const playreadyIdx = keySystemsToAttempt.indexOf(KeySystems.PLAYREADY);
+    if (
+      playreadyIdx !== -1 &&
+      keySystemsToAttempt.indexOf(KeySystems.PLAYREADY_RECOMMENDATION) === -1
+    ) {
+      keySystemsToAttempt = keySystemsToAttempt.slice();
+      keySystemsToAttempt.splice(
+        playreadyIdx + 1,
+        0,
+        KeySystems.PLAYREADY_RECOMMENDATION,
       );
     }
     return this.attemptKeySystemAccess(keySystemsToAttempt);
@@ -622,6 +655,48 @@ class EMEController extends Logger implements ComponentAPI {
     this.keyFormatPromise
       .then((keySystemFormat) => {
         const keySystem = keySystemFormatToKeySystemDomain(keySystemFormat);
+        if (initDataType === 'cenc') {
+          // Handle CENC encrypted events for non-FairPlay key systems (e.g., PlayReady).
+          // This fires when we append a patched init segment containing encv+sinf+PSSH
+          // for a clear segment that had no PSSH. Find the session that was created from
+          // playlist key info but had generateRequest() skipped due to missing PSSH, and
+          // supply the PSSH from this event so the CDM can activate.
+          const { keyIdToKeySessionPromise, mediaKeySessions } = this;
+          for (let i = 0; i < mediaKeySessions.length; i++) {
+            const keyContext = mediaKeySessions[i];
+            if (
+              keySystemDomainToKeySystemFormat(keyContext.keySystem) !==
+              keySystemFormat
+            ) {
+              continue;
+            }
+            const decryptdata = keyContext.decryptdata;
+            if (decryptdata.pssh) {
+              continue;
+            }
+            const keyId = getKeyIdString(decryptdata);
+            decryptdata.pssh = new Uint8Array(initData);
+            const existing =
+              keyIdToKeySessionPromise[keyId] || Promise.resolve(keyContext);
+            const cencPromise = existing.then(() =>
+              this.generateRequestWithPreferredKeySession(
+                keyContext,
+                initDataType,
+                initData,
+                'encrypted-event-key-match',
+              ),
+            );
+            cencPromise.catch((error) => this.handleError(error));
+            keyIdToKeySessionPromise[keyId] = cencPromise;
+            return;
+          }
+          this.log(
+            `Storing PSSH from "${event.type}" event for key-system ${keySystem} (no session exists yet)`,
+          );
+          this.pendingCencInitData = initData;
+          return;
+        }
+
         if (initDataType !== 'sinf' || keySystem !== KeySystems.FAIRPLAY) {
           this.log(
             `Ignoring "${event.type}" event with init data type: "${initDataType}" for selected key-system ${keySystem}`,
@@ -774,6 +849,13 @@ class EMEController extends Logger implements ComponentAPI {
           throw error;
         }
       }
+    }
+
+    if (initData === null && this.pendingCencInitData) {
+      this.log('Using stored CENC PSSH for generateRequest');
+      initData = this.pendingCencInitData;
+      this.pendingCencInitData = null;
+      context.decryptdata.pssh = new Uint8Array(initData);
     }
 
     if (initData === null) {
@@ -1332,7 +1414,10 @@ class EMEController extends Logger implements ComponentAPI {
 
       this.setupLicenseXHR(xhr, url, keySessionContext, licenseChallenge)
         .then(({ xhr, licenseChallenge }) => {
-          if (keySessionContext.keySystem == KeySystems.PLAYREADY) {
+          if (
+            keySessionContext.keySystem == KeySystems.PLAYREADY ||
+            keySessionContext.keySystem == KeySystems.PLAYREADY_RECOMMENDATION
+          ) {
             licenseChallenge = this.unpackPlayReadyKeyMessage(
               xhr,
               licenseChallenge,

@@ -39,7 +39,8 @@ import {
   getPartWith,
   updateFragPTSDTS,
 } from '../utils/level-helper';
-import { appendUint8Array } from '../utils/mp4-tools';
+import { appendUint8Array, dumpSegment } from '../utils/mp4-tools';
+import { patchClearInitSegment } from '../utils/playready-workaround';
 import TimeRanges from '../utils/time-ranges';
 import type { FragmentTracker } from './fragment-tracker';
 import type { HlsConfig } from '../config';
@@ -122,7 +123,12 @@ export default class BaseStreamController
   protected initPTS: TimestampOffset[] = [];
   protected buffering: boolean = true;
   protected loadingParts: boolean = false;
+  protected firstEncryptedInitSegmentData: Uint8Array | null = null;
+  protected firstEncryptedMediaSegmentData: Uint8Array | null = null;
+  protected waitingForInitSegmentAppend: boolean = false;
   private loopSn?: string | number;
+
+  private encryptedInitSegmentPatched: boolean = false;
 
   constructor(
     hls: Hls,
@@ -329,6 +335,7 @@ export default class BaseStreamController
       return;
     }
     this.loadingParts = false;
+    this.encryptedInitSegmentPatched = false;
     this.fragmentTracker.removeAllFragments();
     this.stopLoad();
   }
@@ -534,9 +541,17 @@ export default class BaseStreamController
         }
 
         if ('payload' in data) {
+          // dumpSegment(
+          //   'media segment',
+          //   new Uint8Array(data.payload),
+          //   'media segment',
+          // );
           this.log(
             `Loaded ${frag.type} sn: ${frag.sn} of ${this.playlistLabel()} ${frag.level}`,
           );
+          if (hls.config.requiresEncryptionInfoInAllInitSegments) {
+            data.payload = this.patchMediaSegment(data.payload);
+          }
           this.hls.trigger(Events.FRAG_LOADED, data);
         }
 
@@ -550,6 +565,10 @@ export default class BaseStreamController
         this.warn(`Frag error: ${reason?.message || reason}`);
         this.resetFragmentLoading(fragment);
       });
+  }
+
+  protected patchMediaSegment(payload: ArrayBuffer): ArrayBuffer {
+    return payload;
   }
 
   protected clearTrackerIfNeeded(frag: Fragment) {
@@ -692,6 +711,28 @@ export default class BaseStreamController
               return this.completeInitSegmentLoad(data);
             });
         }
+        console.log(
+          '$$$ _loadInitSegment - no decryption, payload byteLength:',
+          payload?.byteLength,
+          data,
+        );
+        if (
+          this.firstEncryptedInitSegmentData &&
+          !this.encryptedInitSegmentPatched &&
+          hls.config.requiresEncryptionInfoInAllInitSegments
+        ) {
+          this.encryptedInitSegmentPatched = true;
+          console.log(
+            '$$$ _loadInitSegment - TODO patching init segment with encryption data from first encrypted fragment',
+            this.firstEncryptedInitSegmentData?.byteLength,
+          );
+          const patched = patchClearInitSegment(
+            new Uint8Array(data.payload),
+            this.firstEncryptedInitSegmentData,
+          );
+          data.frag.data = patched;
+          data.payload = patched.buffer;
+        }
         return this.completeInitSegmentLoad(data);
       })
       .catch((reason) => {
@@ -712,7 +753,10 @@ export default class BaseStreamController
     if (this.state !== State.STOPPED) {
       this.state = State.IDLE;
     }
-    data.frag.data = new Uint8Array(data.payload);
+    if (!data.frag.data) {
+      data.frag.data = new Uint8Array(data.payload);
+    }
+    this.waitingForInitSegmentAppend = false;
     stats.parsing.start = stats.buffering.start = self.performance.now();
     stats.parsing.end = stats.buffering.end = self.performance.now();
     this.tick();

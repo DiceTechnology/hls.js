@@ -283,6 +283,10 @@ export class Fragment extends BaseSegment {
     return this._decryptdata;
   }
 
+  set decryptdata(value: LevelKey | null) {
+    this._decryptdata = value;
+  }
+
   get end(): number {
     return this.start + this.duration;
   }

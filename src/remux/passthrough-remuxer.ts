@@ -89,6 +89,7 @@ class PassThroughRemuxer extends Logger implements Remuxer {
       this.initData = undefined;
       return;
     }
+
     const { audio, video } = (this.initData = parseInitSegment(initSegment));
 
     if (decryptdata) {
@@ -179,6 +180,7 @@ class PassThroughRemuxer extends Logger implements Remuxer {
     // The binary segment data is added to the videoTrack in the mp4demuxer. We don't check to see if the data is only
     // audio or video (or both); adding it to video was an arbitrary choice.
     const data = videoTrack.samples;
+
     if (!data.length) {
       return result;
     }

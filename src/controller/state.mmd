@@ -1,0 +1,31 @@
+stateDiagram-v2
+    [*] --> STOPPED : controller created
+
+    STOPPED --> IDLE : startLoad()\nsetInterval(100ms)
+
+    IDLE --> WAITING_LEVEL : level details\nnot yet loaded
+    IDLE --> KEY_LOADING : fragment is\nencrypted
+    IDLE --> FRAG_LOADING : fragment selected,\nno encryption
+
+    WAITING_LEVEL --> IDLE : LEVEL_LOADED\nevent fires
+
+    KEY_LOADING --> IDLE : KEY_LOADED\nevent fires
+
+    FRAG_LOADING --> PARSING : download complete,\ntransmuxer processes data
+    FRAG_LOADING --> FRAG_LOADING_WAITING_RETRY : load error,\nretry configured
+
+    FRAG_LOADING_WAITING_RETRY --> IDLE : retry delay elapsed
+
+    PARSING --> PARSED : transmux complete,\ntiming updated
+    PARSED --> IDLE : buffer append complete\n(FRAG_BUFFERED event)
+
+    IDLE --> ENDED : all segments buffered
+
+    ENDED --> IDLE : seek or buffer flush
+
+    IDLE --> STOPPED : stopLoad()
+    FRAG_LOADING --> STOPPED : stopLoad()
+
+    FRAG_LOADING --> ERROR : fatal load error
+    PARSING --> ERROR : fatal parse error
+    ERROR --> STOPPED : stopLoad()

@@ -122,6 +122,7 @@ export default class BufferController extends Logger implements ComponentAPI {
 
   constructor(hls: Hls, fragmentTracker: FragmentTracker) {
     super('buffer-controller', hls.logger);
+    this.debug('$$$ BufferController constructor');
     this.hls = hls;
     this.fragmentTracker = fragmentTracker;
     this.appendSource = isManagedMediaSource(
@@ -254,6 +255,7 @@ export default class BufferController extends Logger implements ComponentAPI {
     event: Events.MANIFEST_PARSED,
     data: ManifestParsedData,
   ) {
+    this.log('$$$ BufferController onManifestParsed', data);
     // in case of alt audio 2 BUFFER_CODECS events will be triggered, one per stream controller
     // sourcebuffers will be created all at once when the expected nb of tracks will be reached
     // in case alt audio is not used, only one BUFFER_CODEC event will be fired from main stream controller

@@ -1,4 +1,5 @@
 import { utf8ArrayToStr } from '@svta/common-media-library/utils/utf8ArrayToStr';
+import * as MP4Box from 'mp4box';
 import { arrayToHex } from './hex';
 import { ElementaryStreamTypes } from '../loader/fragment';
 import { logger } from '../utils/logger';
@@ -569,11 +570,11 @@ function addLeadingZero(num: number): string {
 export function patchEncyptionData(
   initSegment: Uint8Array<ArrayBuffer> | undefined,
   decryptdata: DecryptData | null,
-) {
+): Uint8Array<ArrayBuffer> | undefined {
   if (!initSegment || !decryptdata) {
-    return;
+    return initSegment;
   }
-  const keyId = decryptdata.keyId;
+  const { keyId } = decryptdata;
   if (keyId && decryptdata.isCommonEncryption) {
     applyToTencBoxes(initSegment, (tenc, isAudio) => {
       // Look for default key id (keyID offset is always 8 within the tenc box):
@@ -588,6 +589,7 @@ export function patchEncyptionData(
       }
     });
   }
+  return initSegment;
 }
 
 export function parseKeyIdsFromTenc(
@@ -627,6 +629,59 @@ function applyToTencBoxes(
         }
       });
     });
+  });
+}
+
+export function dumpSegment(
+  message: string,
+  segment: Uint8Array<ArrayBuffer>,
+  // log: (...args: Array<string | object>) => void,
+  label: string,
+  parsed: boolean = false,
+): void {
+  console.log('$$$$ dumping segment for', message);
+  function downloadBlob(blob: Blob, extension: string) {
+    const now = new Date();
+    const stamp = `${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}-${String(now.getMilliseconds()).padStart(3, '0')}`;
+    const safeLabel = label.replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    const dumpFile = `${safeLabel}-${stamp}.${extension}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dump/${dumpFile}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    console.log(
+      `$$$$ '${label}' segment dump saved to ~/Downloads/${dumpFile}`,
+    );
+  }
+
+  if (parsed) {
+    const mp4boxfile = MP4Box.createFile();
+    mp4boxfile.onReady = (info) => {
+      const json = JSON.stringify({ message, info }, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      downloadBlob(blob, 'json');
+    };
+    const buffer = segment.buffer as ArrayBuffer & { fileStart: number };
+    buffer.fileStart = 0;
+    mp4boxfile.appendBuffer(buffer);
+  } else {
+    console.log(`$$$$ ${message} (json):`, segment);
+    const hex = Array.from(segment, (b) =>
+      b.toString(16).padStart(2, '0'),
+    ).join(' ');
+    downloadBlob(new Blob([hex], { type: 'text/plain' }), 'txt');
+  }
+}
+
+export function patchTencIsProtected(
+  initSegment: Uint8Array<ArrayBuffer>,
+): void {
+  console.log('$$$$ patching tenc isProtected and IV size');
+  applyToTencBoxes(initSegment, (tenc) => {
+    tenc[6] = 1; // default_isProtected
+    tenc[7] = 16; // default_Per_Sample_IV_Size
   });
 }
 

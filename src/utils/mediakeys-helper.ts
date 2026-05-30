@@ -10,6 +10,7 @@ export const enum KeySystems {
   CLEARKEY = 'org.w3.clearkey',
   FAIRPLAY = 'com.apple.fps',
   PLAYREADY = 'com.microsoft.playready',
+  PLAYREADY_RECOMMENDATION = 'com.microsoft.playready.recommendation',
   WIDEVINE = 'com.widevine.alpha',
 }
 
@@ -67,7 +68,8 @@ export function keySystemDomainToKeySystemFormat(
     case KeySystems.FAIRPLAY:
       return KeySystemFormats.FAIRPLAY;
     case KeySystems.PLAYREADY:
-      return KeySystemFormats.PLAYREADY;
+    case KeySystems.PLAYREADY_RECOMMENDATION:
+        return KeySystemFormats.PLAYREADY;
     case KeySystems.WIDEVINE:
       return KeySystemFormats.WIDEVINE;
     case KeySystems.CLEARKEY:
@@ -122,6 +124,7 @@ export function getSupportedMediaKeySystemConfigurations(
       break;
     case KeySystems.WIDEVINE:
     case KeySystems.PLAYREADY:
+    case KeySystems.PLAYREADY_RECOMMENDATION:
       initDataTypes = ['cenc'];
       break;
     case KeySystems.CLEARKEY:
@@ -152,12 +155,12 @@ function createMediaKeySystemConfigurations(
       drmSystemOptions.sessionType || 'temporary',
     ],
     audioCapabilities: audioCodecs.map((codec) => ({
-      contentType: `audio/mp4; codecs=${codec}`,
+      contentType: `audio/mp4; codecs="${codec}"`,
       robustness: drmSystemOptions.audioRobustness || '',
       encryptionScheme: drmSystemOptions.audioEncryptionScheme || null,
     })),
     videoCapabilities: videoCodecs.map((codec) => ({
-      contentType: `video/mp4; codecs=${codec}`,
+      contentType: `video/mp4; codecs="${codec}"`,
       robustness: drmSystemOptions.videoRobustness || '',
       encryptionScheme: drmSystemOptions.videoEncryptionScheme || null,
     })),

@@ -19,6 +19,17 @@ import {
 } from './mp4-tools';
 import type { LevelDetails } from '../loader/level-details';
 
+function isWindows(): boolean {
+  const uaData = (navigator as { userAgentData?: { platform?: string } })
+    .userAgentData;
+  if (uaData?.platform) {
+    return uaData.platform.toLowerCase() === 'windows';
+  }
+  return (
+    !!navigator.platform && navigator.platform.toLowerCase().includes('win')
+  );
+}
+
 /**
  * Applies a PlayReady DRM workaround to level details.
  *
@@ -168,7 +179,7 @@ export function fakeEncryption(initSegment: Uint8Array) {
       // not clear why this is necessary on Xbox One, but it seems to be evidence
       // of another bug in the firmware implementation of MediaSource & EME.
       // TODO: needs more tests
-      if (navigator.userAgent.match(/Edge?\//)) {
+      if (isWindows()) {
         newEntries.push(encEntry);
         newEntries.push(entry);
       } else {
@@ -266,7 +277,7 @@ export function fakeEncryption(initSegment: Uint8Array) {
   // patched one, otherwise video element throws following error:
   // CHUNK_DEMUXER_ERROR_APPEND_FAILED: Sample encryption info is not
   // available.
-  if (navigator.userAgent.match(/Edge?\//)) {
+  if (isWindows()) {
     return appendUint8Array(modifiedInitSegment, initSegment);
   } else {
     return modifiedInitSegment;
